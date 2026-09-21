@@ -226,6 +226,7 @@ export default function EloCRM() {
 function LoadingScreen({ text }) {
   return (
     <div style={{ ...styles.app, alignItems: "center", justifyContent: "center" }}>
+      <style>{globalCss}</style>
       <div style={{ color: "#5B626B", fontSize: 14 }}>{text}</div>
     </div>
   );
@@ -907,7 +908,7 @@ const styles = {
   taskMiniDate: { color: "#9AA0A6", fontSize: 12, marginLeft: 6, whiteSpace: "nowrap" },
   filterRow: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 },
   searchBar: { display: "flex", alignItems: "center", gap: 8, background: "#FFFFFF", border: "1px solid #E2E3DE", borderRadius: 7, padding: "8px 12px", maxWidth: 300, flex: 1 },
-  searchInput: { border: "none", outline: "none", flex: 1, fontSize: 13.5, background: "transparent" },
+  searchInput: { border: "none", outline: "none", flex: 1, fontSize: 13.5, background: "transparent", color: "#1C2127" },
   filterSelect: { border: "1px solid #E2E3DE", borderRadius: 7, padding: "8px 10px", fontSize: 12.5, background: "#FFFFFF", color: "#5B626B" },
   filterToggle: { display: "flex", alignItems: "center", gap: 6, border: "1px solid #E2E3DE", borderRadius: 7, padding: "8px 12px", fontSize: 12.5, background: "#FFFFFF", color: "#5B626B", cursor: "pointer" },
   filterToggleActive: { background: "#E7F1EE", borderColor: "#2F6F63", color: "#2F6F63" },
@@ -923,7 +924,7 @@ const styles = {
   iconBtn: { border: "none", background: "transparent", color: "#9AA0A6", cursor: "pointer", padding: 5, borderRadius: 5 },
   primaryBtn: { display: "flex", alignItems: "center", gap: 6, background: "#2F6F63", color: "#FFFFFF", border: "none", borderRadius: 7, padding: "9px 14px", fontSize: 13.5, fontWeight: 500, cursor: "pointer" },
   secondaryBtn: { background: "transparent", color: "#5B626B", border: "1px solid #DFE1DC", borderRadius: 7, padding: "9px 14px", fontSize: 13.5, cursor: "pointer" },
-  input: { width: "100%", boxSizing: "border-box", border: "1px solid #DFE1DC", borderRadius: 6, padding: "8px 10px", fontSize: 13.5, fontFamily: "inherit", outline: "none", background: "#FCFCFB" },
+  input: { width: "100%", boxSizing: "border-box", border: "1px solid #DFE1DC", borderRadius: 6, padding: "8px 10px", fontSize: 13.5, fontFamily: "inherit", outline: "none", background: "#FCFCFB", color: "#1C2127", colorScheme: "light" },
   fieldRow: { display: "flex", gap: 12 },
   fieldLabel: { fontSize: 12, color: "#6B7178", marginBottom: 5 },
   modalOverlay: { position: "fixed", inset: 0, background: "rgba(28,33,39,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 },
@@ -953,8 +954,10 @@ const styles = {
 };
 
 const globalCss = `
+  html { color-scheme: light; }
   * { box-sizing: border-box; }
-  input, select, textarea, button { font-family: inherit; }
+  input, select, textarea, button { font-family: inherit; color: #1C2127; }
+  input::placeholder, textarea::placeholder { color: #9AA0A6; opacity: 1; }
   input:focus, select:focus, textarea:focus { border-color: #2F6F63 !important; }
   @media (max-width: 640px) {
     .elo-sidebar { width: 60px !important; padding: 16px 8px !important; }
