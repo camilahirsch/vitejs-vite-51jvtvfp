@@ -18,6 +18,12 @@ import {
   LogOut,
   Bell,
   TrendingUp,
+  ChevronDown,
+  Settings,
+  User,
+  HelpCircle,
+  Layers,
+  Receipt,
 } from "lucide-react";
 import {
   BarChart,
@@ -88,6 +94,47 @@ function isSameMonth(dateStr) {
   const d = new Date(dateStr);
   const now = new Date();
   return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+}
+
+const DATE_RANGE_OPTIONS = [
+  { id: "today", label: "Hoje" },
+  { id: "7d", label: "Últimos 7 dias" },
+  { id: "30d", label: "Últimos 30 dias" },
+  { id: "month", label: "Este mês" },
+  { id: "all", label: "Todo o período" },
+];
+
+function inDateRange(dateStr, mode, from, to) {
+  if (!dateStr) return false;
+  if (mode === "all") return true;
+  if (mode === "today") return dateStr.slice(0, 10) === todayISO();
+  if (mode === "7d") return withinDays(dateStr, 7);
+  if (mode === "30d") return withinDays(dateStr, 30);
+  if (mode === "month") return isSameMonth(dateStr);
+  if (mode === "custom") {
+    const d = dateStr.slice(0, 10);
+    if (from && d < from) return false;
+    if (to && d > to) return false;
+    return true;
+  }
+  return true;
+}
+
+function dateRangeLabel(mode, from, to) {
+  if (mode === "custom") {
+    if (from && to) return `${fmtDateFull(from)} → ${fmtDateFull(to)}`;
+    if (from) return `A partir de ${fmtDateFull(from)}`;
+    if (to) return `Até ${fmtDateFull(to)}`;
+    return "Período personalizado";
+  }
+  const opt = DATE_RANGE_OPTIONS.find((o) => o.id === mode);
+  return opt ? opt.label : "Todo o período";
+}
+
+function fmtDateFull(isoDate) {
+  if (!isoDate) return "";
+  const [y, m, d] = isoDate.split("-");
+  return `${d}/${m}/${y}`;
 }
 
 function reminderState(dateStr) {
@@ -261,6 +308,10 @@ export default function EloCRM() {
         {tab === "tarefas" && (
           <Tarefas tasks={tasks} contacts={contacts} onAdd={addTask} onToggle={toggleTask} onRemove={removeTask} />
         )}
+        {tab === "dados" && <Dados profile={profile} org={org} email={session?.user?.email} />}
+        {tab === "ajuda" && <Ajuda />}
+        {tab === "planos" && <Planos org={org} remaining={remaining} isActive={isActive} />}
+        {tab === "pagamentos" && <Pagamentos org={org} isActive={isActive} />}
       </div>
     </div>
   );
@@ -403,12 +454,21 @@ function AuthScreen() {
    ============================================================ */
 
 function Sidebar({ tab, setTab }) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const items = [
     { id: "painel", label: "Painel", icon: LayoutGrid },
     { id: "contatos", label: "Contatos", icon: Users },
     { id: "funil", label: "Funil", icon: Columns3 },
     { id: "tarefas", label: "Tarefas", icon: CheckSquare },
   ];
+  const settingsItems = [
+    { id: "dados", label: "Dados", icon: User },
+    { id: "ajuda", label: "Ajuda", icon: HelpCircle },
+    { id: "planos", label: "Planos", icon: Layers },
+    { id: "pagamentos", label: "Pagamentos", icon: Receipt },
+  ];
+  const settingsActive = settingsItems.some((it) => it.id === tab);
+
   return (
     <div style={styles.sidebar} className="elo-sidebar">
       <div style={styles.brand}>
@@ -427,10 +487,41 @@ function Sidebar({ tab, setTab }) {
           );
         })}
       </nav>
-      <button style={styles.logoutBtn} onClick={() => supabase.auth.signOut()}>
-        <LogOut size={15} />
-        <span className="elo-nav-label">Sair</span>
-      </button>
+
+      <div style={styles.sidebarBottom}>
+        {settingsOpen && (
+          <div style={styles.settingsMenu}>
+            {settingsItems.map((it) => {
+              const Icon = it.icon;
+              const active = tab === it.id;
+              return (
+                <button
+                  key={it.id}
+                  onClick={() => {
+                    setTab(it.id);
+                    setSettingsOpen(false);
+                  }}
+                  style={{ ...styles.settingsMenuItem, ...(active ? styles.settingsMenuItemActive : {}) }}
+                >
+                  <Icon size={15} strokeWidth={2} />
+                  <span>{it.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <button
+          style={{ ...styles.navBtn, ...(settingsActive ? styles.navBtnActive : {}) }}
+          onClick={() => setSettingsOpen((v) => !v)}
+        >
+          <Settings size={17} strokeWidth={2} />
+          <span className="elo-nav-label">Configurações</span>
+        </button>
+        <button style={styles.logoutBtn} onClick={() => supabase.auth.signOut()}>
+          <LogOut size={15} />
+          <span className="elo-nav-label">Sair</span>
+        </button>
+      </div>
     </div>
   );
 }
@@ -440,32 +531,50 @@ function Sidebar({ tab, setTab }) {
    ============================================================ */
 
 function Painel({ contacts, tasks }) {
-  const open = contacts.filter((c) => c.stage !== "ganho" && c.stage !== "perdido");
-  const won = contacts.filter((c) => c.stage === "ganho");
-  const lost = contacts.filter((c) => c.stage === "perdido");
+  const [rangeMode, setRangeMode] = useState("all");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+
+  const scoped = contacts.filter((c) => inDateRange(c.created_at, rangeMode, customFrom, customTo));
+
+  const open = scoped.filter((c) => c.stage !== "ganho" && c.stage !== "perdido");
+  const won = scoped.filter((c) => c.stage === "ganho");
+  const lost = scoped.filter((c) => c.stage === "perdido");
   const pendingTasks = tasks.filter((t) => !t.done);
   const pipelineValue = open.reduce((s, c) => s + Number(c.value || 0), 0);
   const wonValue = won.reduce((s, c) => s + Number(c.value || 0), 0);
   const closedTotal = won.length + lost.length;
   const conversionRate = closedTotal === 0 ? null : (won.length / closedTotal) * 100;
 
-  const dueReminders = contacts
+  const dueReminders = scoped
     .filter((c) => c.next_reminder_date && reminderState(c.next_reminder_date) !== "futuro")
     .sort((a, b) => a.next_reminder_date.localeCompare(b.next_reminder_date));
 
   const chartData = STAGES.filter((s) => s.id !== "perdido").map((s) => ({
     name: s.label,
-    valor: contacts.filter((c) => c.stage === s.id).reduce((sum, c) => sum + Number(c.value || 0), 0),
+    valor: scoped.filter((c) => c.stage === s.id).reduce((sum, c) => sum + Number(c.value || 0), 0),
     color: s.color,
   }));
 
   return (
     <div>
-      <h1 style={styles.h1}>Painel</h1>
-      <p style={styles.sub}>Como está o seu negócio agora.</p>
+      <div style={styles.headerRow}>
+        <div>
+          <h1 style={styles.h1}>Painel</h1>
+          <p style={styles.sub}>Como está o seu negócio agora.</p>
+        </div>
+        <DateRangePicker
+          mode={rangeMode}
+          from={customFrom}
+          to={customTo}
+          onChangeMode={setRangeMode}
+          onChangeFrom={setCustomFrom}
+          onChangeTo={setCustomTo}
+        />
+      </div>
 
       <div style={styles.cardsRow}>
-        <MetricCard label="Contatos ativos" value={contacts.length} />
+        <MetricCard label="Contatos no período" value={scoped.length} />
         <MetricCard label="Em negociação" value={fmtMoney(pipelineValue)} />
         <MetricCard label="Fechado (ganho)" value={fmtMoney(wonValue)} accent="#3C8558" />
         <MetricCard
@@ -556,6 +665,63 @@ function MetricCard({ label, value, accent }) {
 
 function EmptyRow({ text }) {
   return <div style={styles.emptyRow}>{text}</div>;
+}
+
+function DateRangePicker({ mode, from, to, onChangeMode, onChangeFrom, onChangeTo }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div style={styles.datePicker}>
+      <button style={styles.dateBtn} onClick={() => setOpen((v) => !v)}>
+        <Calendar size={14} />
+        <span>{dateRangeLabel(mode, from, to)}</span>
+        <ChevronDown size={14} style={styles.dateChev} />
+      </button>
+      {open && (
+        <>
+          <div style={styles.dateBackdrop} onClick={() => setOpen(false)} />
+          <div style={styles.dateDropdown}>
+            {DATE_RANGE_OPTIONS.map((opt) => (
+              <div
+                key={opt.id}
+                style={{ ...styles.dateOpt, ...(mode === opt.id ? styles.dateOptActive : {}) }}
+                onClick={() => {
+                  onChangeMode(opt.id);
+                  setOpen(false);
+                }}
+              >
+                {opt.label}
+              </div>
+            ))}
+            <div style={styles.dateCustom}>
+              <div style={styles.dateCustomLabel}>PERÍODO PERSONALIZADO</div>
+              <div style={styles.dateInputs}>
+                <input
+                  type="date"
+                  style={styles.dateInput}
+                  value={from}
+                  onChange={(e) => {
+                    onChangeFrom(e.target.value);
+                    onChangeMode("custom");
+                  }}
+                />
+                <span style={{ color: "#9CA3AF" }}>→</span>
+                <input
+                  type="date"
+                  style={styles.dateInput}
+                  value={to}
+                  onChange={(e) => {
+                    onChangeTo(e.target.value);
+                    onChangeMode("custom");
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 /* ============================================================
@@ -932,6 +1098,185 @@ function Tarefas({ tasks, contacts, onAdd, onToggle, onRemove }) {
 }
 
 /* ============================================================
+   DADOS
+   ============================================================ */
+
+function Dados({ profile, org, email }) {
+  const [fullName, setFullName] = useState(profile?.full_name || "");
+  const [companyName, setCompanyName] = useState(org?.name || "");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    setSaved(false);
+    await supabase.from("profiles").update({ full_name: fullName }).eq("id", profile.id);
+    await supabase.from("organizations").update({ name: companyName }).eq("id", org.id);
+    setSaving(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
+  };
+
+  return (
+    <div>
+      <h1 style={styles.h1}>Dados</h1>
+      <p style={styles.sub}>Informações da sua conta e da sua empresa.</p>
+
+      <div style={styles.panel}>
+        <div style={styles.panelHeader}>Sua conta</div>
+        <Field label="Seu nome">
+          <input style={styles.input} value={fullName} onChange={(e) => setFullName(e.target.value)} />
+        </Field>
+        <Field label="E-mail de acesso">
+          <input style={{ ...styles.input, color: "#9AA0A6" }} value={email || ""} disabled />
+        </Field>
+      </div>
+
+      <div style={styles.panel}>
+        <div style={styles.panelHeader}>Empresa</div>
+        <Field label="Nome da empresa">
+          <input style={styles.input} value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
+        </Field>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <button style={styles.primaryBtn} onClick={save} disabled={saving}>
+          {saving ? "Salvando…" : "Salvar alterações"}
+        </button>
+        {saved && <span style={{ fontSize: 13, color: "#15803D", fontWeight: 600 }}>Salvo!</span>}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   AJUDA
+   ============================================================ */
+
+function Ajuda() {
+  const faqs = [
+    {
+      q: "Como cadastro um novo contato?",
+      a: "Vá em Contatos e clique em “+ Novo”. Preencha os dados e escolha a etapa do funil.",
+    },
+    {
+      q: "Como movo um contato entre etapas do funil?",
+      a: "Na tela Funil, arraste o contato para a coluna da etapa desejada, ou edite o contato e altere o campo Etapa.",
+    },
+    {
+      q: "Como funciona o período de teste?",
+      a: "Toda conta nova começa com alguns dias de teste grátis, sem precisar de cartão. Você pode acompanhar quanto tempo resta em Planos.",
+    },
+    {
+      q: "Meus dados ficam seguros?",
+      a: "Sim. Cada empresa só enxerga seus próprios contatos e tarefas — o acesso é isolado por conta.",
+    },
+  ];
+
+  return (
+    <div>
+      <h1 style={styles.h1}>Ajuda</h1>
+      <p style={styles.sub}>Dúvidas comuns e como falar com a gente.</p>
+
+      <div style={styles.panel}>
+        <div style={styles.panelHeader}>Perguntas frequentes</div>
+        {faqs.map((f, i) => (
+          <div key={i} style={{ padding: "12px 2px", borderTop: i === 0 ? "none" : "1px solid #F1F2F0" }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>{f.q}</div>
+            <div style={{ fontSize: 13, color: "#5B626B", lineHeight: 1.5 }}>{f.a}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={styles.panel}>
+        <div style={styles.panelHeader}>Precisa de mais ajuda?</div>
+        <p style={{ fontSize: 13, color: "#5B626B", lineHeight: 1.5 }}>
+          Fale com a gente pelo e-mail{" "}
+          <a href="mailto:suporte@hirschgrowth.com.br" style={{ color: "#15803D", fontWeight: 600 }}>
+            suporte@hirschgrowth.com.br
+          </a>
+          .
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   PLANOS
+   ============================================================ */
+
+function Planos({ org, remaining, isActive }) {
+  return (
+    <div>
+      <h1 style={styles.h1}>Planos</h1>
+      <p style={styles.sub}>Acompanhe seu período de teste e o plano do Elo.</p>
+
+      <div style={styles.panel}>
+        <div style={styles.panelHeader}>Status atual</div>
+        <p style={{ fontSize: 13.5, color: "#374151", marginBottom: 4 }}>
+          {isActive
+            ? "Assinatura ativa."
+            : remaining !== null && remaining > 0
+            ? `Período de teste — faltam ${remaining} dia${remaining === 1 ? "" : "s"}.`
+            : "Período de teste encerrado."}
+        </p>
+      </div>
+
+      <div style={styles.panel}>
+        <div style={styles.panelHeader}>Plano Elo</div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 10 }}>
+          <span style={{ fontSize: 26, fontWeight: 700 }}>Em breve</span>
+        </div>
+        <p style={{ fontSize: 13, color: "#5B626B", lineHeight: 1.5, marginBottom: 14 }}>
+          Contatos, funil de vendas, tarefas e lembretes ilimitados para sua empresa. O valor da assinatura ainda
+          será definido — por enquanto, aproveite o período de teste gratuito.
+        </p>
+        <a
+          href={STRIPE_PAYMENT_LINK}
+          style={{ ...styles.primaryBtn, textDecoration: "none", display: "inline-flex" }}
+        >
+          Assinar agora
+        </a>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   PAGAMENTOS
+   ============================================================ */
+
+function Pagamentos({ org, isActive }) {
+  return (
+    <div>
+      <h1 style={styles.h1}>Pagamentos</h1>
+      <p style={styles.sub}>Assinatura e histórico de cobranças.</p>
+
+      <div style={styles.panel}>
+        <div style={styles.panelHeader}>Assinatura</div>
+        <p style={{ fontSize: 13.5, color: "#374151", marginBottom: 10 }}>
+          Status: <strong>{isActive ? "Ativa" : org?.subscription_status === "trialing" ? "Em teste" : org?.subscription_status || "—"}</strong>
+        </p>
+        {!isActive && (
+          <a
+            href={STRIPE_PAYMENT_LINK}
+            style={{ ...styles.primaryBtn, textDecoration: "none", display: "inline-flex" }}
+          >
+            Assinar agora
+          </a>
+        )}
+      </div>
+
+      <div style={styles.panel}>
+        <div style={styles.panelHeader}>Histórico de cobranças</div>
+        <EmptyRow text="Nenhuma cobrança realizada ainda." />
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    PEÇAS COMPARTILHADAS
    ============================================================ */
 
@@ -981,7 +1326,24 @@ const styles = {
   nav: { display: "flex", flexDirection: "column", gap: 2 },
   navBtn: { display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, border: "none", background: "transparent", color: "#9CA3AF", fontSize: 13.5, cursor: "pointer", textAlign: "left" },
   navBtnActive: { background: "#1C2432", color: "#FFFFFF", fontWeight: 600 },
-  logoutBtn: { marginTop: "auto", display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, border: "none", background: "transparent", color: "#6B7280", fontSize: 13, cursor: "pointer" },
+  sidebarBottom: { marginTop: "auto", display: "flex", flexDirection: "column", gap: 2, position: "relative" },
+  settingsMenu: {
+    position: "absolute",
+    bottom: "calc(100% + 6px)",
+    left: 0,
+    right: 0,
+    background: "#1C2432",
+    border: "1px solid #2A3242",
+    borderRadius: 10,
+    padding: 6,
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+  },
+  settingsMenuItem: { display: "flex", alignItems: "center", gap: 9, padding: "8px 10px", borderRadius: 7, border: "none", background: "transparent", color: "#B8BEC9", fontSize: 13, cursor: "pointer", textAlign: "left" },
+  settingsMenuItemActive: { background: "#22C55E22", color: "#4ADE80", fontWeight: 600 },
+  logoutBtn: { display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, border: "none", background: "transparent", color: "#6B7280", fontSize: 13, cursor: "pointer" },
   main: { flex: 1, padding: "26px 32px", overflowY: "auto" },
   h1: { fontSize: 21, fontWeight: 600, margin: 0, letterSpacing: "-0.01em" },
   sub: { fontSize: 13, color: "#6B7178", margin: "4px 0 18px 0" },
@@ -1044,6 +1406,7 @@ const styles = {
   trialBanner: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, background: "#FFF7E8", border: "1px solid #F0DCA8", color: "#8A6A1F", borderRadius: 8, padding: "10px 16px", fontSize: 13, marginBottom: 18, flexWrap: "wrap" },
   trialBannerLink: { color: "#15803D", fontWeight: 700, textDecoration: "none", whiteSpace: "nowrap" },
   datePicker: { position: "relative" },
+  dateBackdrop: { position: "fixed", inset: 0, zIndex: 19 },
   dateBtn: { display: "flex", alignItems: "center", gap: 8, background: "#FFFFFF", border: "1px solid #D1D5DB", borderRadius: 8, padding: "9px 14px", fontSize: 13, fontWeight: 600, color: "#0D0C1F", cursor: "pointer" },
   dateChev: { color: "#22C55E", fontSize: 11 },
   dateDropdown: { position: "absolute", right: 0, top: "calc(100% + 6px)", background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.10)", width: 270, padding: 8, zIndex: 20 },
