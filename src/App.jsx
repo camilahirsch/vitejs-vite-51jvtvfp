@@ -409,45 +409,73 @@ function AuthScreen() {
   };
 
   return (
-    <div style={styles.authWrap}>
+    <div style={styles.authPage}>
       <style>{globalCss}</style>
-      <div style={styles.authCard}>
-        <div style={styles.brand}>
-          <span style={styles.brandMark}>●</span>
-          <span style={{ color: "#1C2127" }}>Elo</span>
+
+      <div style={styles.authBrandPanel} className="elo-auth-brand">
+        <div style={styles.authBrandContent}>
+          <div style={styles.brand}>
+            <span style={styles.brandMark}>●</span>
+            <span style={{ color: "#FFFFFF" }}>Elo</span>
+          </div>
+          <h1 style={styles.authPitchTitle}>Um sistema simples para quem cuida do negócio sozinho.</h1>
+          <p style={styles.authPitchSub}>
+            O Elo existe para facilitar o dia a dia de pequenos empreendedores: uma ferramenta rápida e direta,
+            sem complicação, para você enxergar seus contatos, seu funil e suas tarefas com clareza — e continuar
+            focado em vender.
+          </p>
+          <div style={styles.authPitchList}>
+            <div style={styles.authPitchItem}>
+              <CheckCircle2 size={16} style={styles.authPitchIcon} />
+              <span>Visão clara do seu negócio em um só lugar</span>
+            </div>
+            <div style={styles.authPitchItem}>
+              <CheckCircle2 size={16} style={styles.authPitchIcon} />
+              <span>Rápido de usar, sem curva de aprendizado</span>
+            </div>
+            <div style={styles.authPitchItem}>
+              <CheckCircle2 size={16} style={styles.authPitchIcon} />
+              <span>Pensado para quem trabalha sozinho ou em equipes pequenas</span>
+            </div>
+          </div>
         </div>
-        <div style={styles.authTabs}>
-          <button style={{ ...styles.authTab, ...(mode === "login" ? styles.authTabActive : {}) }} onClick={() => setMode("login")}>
-            Entrar
-          </button>
-          <button style={{ ...styles.authTab, ...(mode === "signup" ? styles.authTabActive : {}) }} onClick={() => setMode("signup")}>
-            Criar conta
+      </div>
+
+      <div style={styles.authFormPanel}>
+        <div style={styles.authCard}>
+          <div style={styles.authTabs}>
+            <button style={{ ...styles.authTab, ...(mode === "login" ? styles.authTabActive : {}) }} onClick={() => setMode("login")}>
+              Entrar
+            </button>
+            <button style={{ ...styles.authTab, ...(mode === "signup" ? styles.authTabActive : {}) }} onClick={() => setMode("signup")}>
+              Criar conta
+            </button>
+          </div>
+
+          {mode === "signup" && (
+            <>
+              <Field label="Seu nome">
+                <input style={styles.input} value={fullName} onChange={(e) => setFullName(e.target.value)} />
+              </Field>
+              <Field label="Nome da empresa">
+                <input style={styles.input} value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
+              </Field>
+            </>
+          )}
+          <Field label="E-mail">
+            <input style={styles.input} type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </Field>
+          <Field label="Senha">
+            <input style={styles.input} type="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
+          </Field>
+
+          {error && <div style={styles.authError}>{error}</div>}
+          {info && <div style={styles.authInfo}>{info}</div>}
+
+          <button style={{ ...styles.primaryBtn, width: "100%", justifyContent: "center", marginTop: 6 }} onClick={submit} disabled={loading}>
+            {loading ? "Aguarde…" : mode === "login" ? "Entrar" : "Criar conta"}
           </button>
         </div>
-
-        {mode === "signup" && (
-          <>
-            <Field label="Seu nome">
-              <input style={styles.input} value={fullName} onChange={(e) => setFullName(e.target.value)} />
-            </Field>
-            <Field label="Nome da empresa">
-              <input style={styles.input} value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
-            </Field>
-          </>
-        )}
-        <Field label="E-mail">
-          <input style={styles.input} type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-        </Field>
-        <Field label="Senha">
-          <input style={styles.input} type="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
-        </Field>
-
-        {error && <div style={styles.authError}>{error}</div>}
-        {info && <div style={styles.authInfo}>{info}</div>}
-
-        <button style={{ ...styles.primaryBtn, width: "100%", justifyContent: "center", marginTop: 6 }} onClick={submit} disabled={loading}>
-          {loading ? "Aguarde…" : mode === "login" ? "Entrar" : "Criar conta"}
-        </button>
       </div>
     </div>
   );
@@ -1414,6 +1442,22 @@ const styles = {
   taskRow: { display: "flex", alignItems: "center", gap: 10, padding: "9px 2px", borderTop: "1px solid #EFF0EC", fontSize: 13.5 },
   checkBtn: { border: "none", background: "transparent", cursor: "pointer", padding: 2, display: "flex" },
   authWrap: { minHeight: 560, display: "flex", alignItems: "center", justifyContent: "center", background: "#F3F4F1", fontFamily: FONT_STACK },
+  authPage: { minHeight: "100vh", display: "flex", fontFamily: FONT_STACK, background: "#F3F4F1" },
+  authBrandPanel: {
+    flex: "1 1 50%",
+    background: "#0D0C1F",
+    color: "#EDEEEA",
+    display: "flex",
+    alignItems: "center",
+    padding: "48px",
+  },
+  authBrandContent: { maxWidth: 440, margin: "0 auto" },
+  authPitchTitle: { fontSize: 28, fontWeight: 700, letterSpacing: "-0.01em", lineHeight: 1.25, margin: "28px 0 14px 0" },
+  authPitchSub: { fontSize: 14, color: "#B8BEC9", lineHeight: 1.6, marginBottom: 26 },
+  authPitchList: { display: "flex", flexDirection: "column", gap: 12 },
+  authPitchItem: { display: "flex", alignItems: "flex-start", gap: 10, fontSize: 13.5, color: "#EDEEEA" },
+  authPitchIcon: { color: "#22C55E", flexShrink: 0, marginTop: 1 },
+  authFormPanel: { flex: "1 1 50%", display: "flex", alignItems: "center", justifyContent: "center", padding: 32 },
   authCard: { background: "#FFFFFF", border: "1px solid #E2E3DE", borderRadius: 10, padding: 28, width: 340 },
   authTabs: { display: "flex", gap: 4, background: "#F0F1EC", borderRadius: 7, padding: 3, marginBottom: 18 },
   authTab: { flex: 1, border: "none", background: "transparent", padding: "7px 0", borderRadius: 5, fontSize: 13, color: "#6B7178", cursor: "pointer" },
@@ -1446,5 +1490,8 @@ const globalCss = `
     .elo-sidebar { width: 60px !important; padding: 16px 8px !important; }
     .elo-nav-label { display: none; }
     .elo-hide-narrow { display: none !important; }
+  }
+  @media (max-width: 860px) {
+    .elo-auth-brand { display: none !important; }
   }
 `;
