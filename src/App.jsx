@@ -224,7 +224,7 @@ export default function EloCRM() {
   }, [profile, loadData]);
 
   const addContact = async (contact) => {
-    await supabase.from("contacts").insert({
+    const { error } = await supabase.from("contacts").insert({
       organization_id: profile.organization_id,
       created_by: profile.id,
       name: contact.name,
@@ -238,12 +238,15 @@ export default function EloCRM() {
       next_reminder_date: contact.next_reminder_date || null,
       loss_reason: contact.loss_reason || null,
     });
+    if (error) return error;
     loadData();
+    return null;
   };
 
   const editContact = async (id, patch) => {
     const previous = contacts.find((c) => c.id === id);
-    await supabase.from("contacts").update(patch).eq("id", id);
+    const { error } = await supabase.from("contacts").update(patch).eq("id", id);
+    if (error) return error;
     if (patch.stage && previous && patch.stage !== previous.stage) {
       await supabase.from("deal_stage_history").insert({
         contact_id: id,
@@ -254,6 +257,7 @@ export default function EloCRM() {
       });
     }
     loadData();
+    return null;
   };
 
   const removeContact = async (id) => {
@@ -734,6 +738,8 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
   const [reminderOnly, setReminderOnly] = useState(false);
   const [editing, setEditing] = useState(null);
   const [showForm, setShowForm] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const filtered = contacts.filter((c) => {
     const q = query.toLowerCase();
@@ -765,20 +771,30 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
       loss_reason: "",
     });
     setShowForm(true);
+    setSaveError("");
   };
 
   const openEdit = (c) => {
     setEditing({ ...c });
     setShowForm(true);
+    setSaveError("");
   };
 
-  const save = () => {
+  const save = async () => {
     if (!editing.name.trim()) return;
+    setSaving(true);
+    setSaveError("");
+    let error = null;
     if (editing.id) {
       const { id, created_at, organization_id, created_by, ...patch } = editing;
-      onEdit(id, patch);
+      error = await onEdit(id, patch);
     } else {
-      onAdd(editing);
+      error = await onAdd(editing);
+    }
+    setSaving(false);
+    if (error) {
+      setSaveError(error.message || "Não foi possível salvar o contato.");
+      return;
     }
     setShowForm(false);
     setEditing(null);
@@ -938,12 +954,13 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
           <Field label="Notas">
             <textarea style={{ ...styles.input, minHeight: 70, resize: "vertical" }} value={editing.notes} onChange={(e) => setEditing({ ...editing, notes: e.target.value })} />
           </Field>
+          {saveError && <div style={styles.authError}>{saveError}</div>}
           <div style={styles.modalFoot}>
             <button style={styles.secondaryBtn} onClick={() => setShowForm(false)}>
               Cancelar
             </button>
-            <button style={styles.primaryBtn} onClick={save}>
-              Salvar contato
+            <button style={styles.primaryBtn} onClick={save} disabled={saving}>
+              {saving ? "Salvando…" : "Salvar contato"}
             </button>
           </div>
         </Modal>
