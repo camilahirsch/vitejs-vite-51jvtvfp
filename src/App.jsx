@@ -66,6 +66,40 @@ const STAGES = [
 
 const stageInfo = (id) => STAGES.find((s) => s.id === id) || STAGES[0];
 
+const LEAD_SOURCES = [
+  { id: "", label: "Não informado" },
+  { id: "indicacao", label: "Indicação" },
+  { id: "redes_sociais", label: "Redes sociais" },
+  { id: "google_ads", label: "Google / Anúncios" },
+  { id: "site", label: "Site" },
+  { id: "whatsapp", label: "WhatsApp" },
+  { id: "evento", label: "Evento" },
+  { id: "outro", label: "Outro" },
+];
+
+const leadSourceLabel = (id) => (LEAD_SOURCES.find((s) => s.id === id) || LEAD_SOURCES[0]).label;
+
+function monthKey(dateStr) {
+  if (!dateStr) return null;
+  return dateStr.slice(0, 7); // "YYYY-MM"
+}
+
+function monthLabel(key) {
+  const [y, m] = key.split("-");
+  const names = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+  return `${names[Number(m) - 1]}/${y.slice(2)}`;
+}
+
+function lastMonthKeys(n) {
+  const keys = [];
+  const now = new Date();
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+  return keys;
+}
+
 function fmtMoney(v) {
   return Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
@@ -237,6 +271,7 @@ export default function EloCRM() {
       last_contact_date: contact.last_contact_date || null,
       next_reminder_date: contact.next_reminder_date || null,
       loss_reason: contact.loss_reason || null,
+      lead_source: contact.lead_source || null,
     });
     if (error) return error;
     loadData();
@@ -309,6 +344,7 @@ export default function EloCRM() {
           <Contatos contacts={contacts} onAdd={addContact} onEdit={editContact} onRemove={removeContact} />
         )}
         {tab === "funil" && <Funil contacts={contacts} onEdit={editContact} />}
+        {tab === "graficos" && <Graficos contacts={contacts} />}
         {tab === "tarefas" && (
           <Tarefas tasks={tasks} contacts={contacts} onAdd={addTask} onToggle={toggleTask} onRemove={removeTask} />
         )}
@@ -493,6 +529,7 @@ function Sidebar({ tab, setTab }) {
     { id: "painel", label: "Painel", icon: LayoutGrid },
     { id: "contatos", label: "Contatos", icon: Users },
     { id: "funil", label: "Funil", icon: Columns3 },
+    { id: "graficos", label: "Gráficos", icon: TrendingUp },
     { id: "tarefas", label: "Tarefas", icon: CheckSquare },
   ];
   const settingsItems = [
@@ -799,6 +836,7 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
       last_contact_date: "",
       next_reminder_date: "",
       loss_reason: "",
+      lead_source: "",
     });
     setShowForm(true);
     setSaveError("");
@@ -947,6 +985,20 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
             </Field>
           </div>
 
+          <Field label="Origem do lead">
+            <select
+              style={styles.input}
+              value={editing.lead_source || ""}
+              onChange={(e) => setEditing({ ...editing, lead_source: e.target.value })}
+            >
+              {LEAD_SOURCES.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+
           {editing.id && (
             <Field label="Data de entrada">
               <input style={{ ...styles.input, color: "#9AA0A6" }} value={fmtDate(editing.created_at) + " (fixa)"} disabled />
@@ -1066,6 +1118,100 @@ function Funil({ contacts, onEdit }) {
 }
 
 /* ============================================================
+   GRÁFICOS
+   ============================================================ */
+
+function Graficos({ contacts }) {
+  const months = lastMonthKeys(6);
+  const revenueData = months.map((key) => ({
+    name: monthLabel(key),
+    valor: contacts
+      .filter((c) => c.stage === "ganho" && monthKey(c.created_at) === key)
+      .reduce((s, c) => s + Number(c.value || 0), 0),
+  }));
+
+  const won = contacts.filter((c) => c.stage === "ganho");
+  const lost = contacts.filter((c) => c.stage === "perdido");
+  const closedTotal = won.length + lost.length;
+  const conversionRate = closedTotal === 0 ? null : (won.length / closedTotal) * 100;
+  const closingData = [
+    { name: "Ganho", qtd: won.length, color: "#15803D" },
+    { name: "Perdido", qtd: lost.length, color: "#DC2626" },
+  ];
+
+  const sourceData = LEAD_SOURCES.map((s) => ({
+    name: s.label,
+    qtd: contacts.filter((c) => (c.lead_source || "") === s.id).length,
+  })).filter((s) => s.qtd > 0);
+
+  return (
+    <div>
+      <h1 style={styles.h1}>Gráficos</h1>
+      <p style={styles.sub}>Uma visão simples do seu negócio ao longo do tempo.</p>
+
+      <div style={styles.panel}>
+        <div style={styles.panelHeader}>Faturamento fechado por mês</div>
+        <div style={{ width: "100%", height: 200 }}>
+          <ResponsiveContainer>
+            <BarChart data={revenueData} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
+              <CartesianGrid stroke="#E7E8E3" vertical={false} />
+              <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#5B626B" }} />
+              <YAxis tick={{ fontSize: 11, fill: "#5B626B" }} tickFormatter={(v) => `R$${v >= 1000 ? `${Math.round(v / 1000)}k` : v}`} />
+              <Tooltip formatter={(v) => fmtMoney(v)} contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid #DFE1DC" }} />
+              <Bar dataKey="valor" radius={[3, 3, 0, 0]} fill="#22C55E" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div style={styles.panel}>
+        <div style={styles.panelHeader}>
+          Fechamento {conversionRate !== null && <span style={{ color: "#5B626B", fontWeight: 400 }}>— {conversionRate.toFixed(0)}% de conversão</span>}
+        </div>
+        {closedTotal === 0 ? (
+          <EmptyRow text="Ainda não há contatos fechados (ganhos ou perdidos)." />
+        ) : (
+          <div style={{ width: "100%", height: 160 }}>
+            <ResponsiveContainer>
+              <BarChart data={closingData} layout="vertical" margin={{ top: 8, right: 24, left: 8, bottom: 0 }}>
+                <CartesianGrid stroke="#E7E8E3" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 11, fill: "#5B626B" }} allowDecimals={false} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fill: "#374151" }} width={70} />
+                <Tooltip contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid #DFE1DC" }} />
+                <Bar dataKey="qtd" radius={[0, 4, 4, 0]}>
+                  {closingData.map((entry, i) => (
+                    <Cell key={i} fill={entry.color} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
+      <div style={styles.panel}>
+        <div style={styles.panelHeader}>Origem dos leads</div>
+        {sourceData.length === 0 ? (
+          <EmptyRow text="Nenhum contato com origem informada ainda." />
+        ) : (
+          <div style={{ width: "100%", height: 200 }}>
+            <ResponsiveContainer>
+              <BarChart data={sourceData} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
+                <CartesianGrid stroke="#E7E8E3" vertical={false} />
+                <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#5B626B" }} interval={0} angle={-12} textAnchor="end" height={50} />
+                <YAxis tick={{ fontSize: 11, fill: "#5B626B" }} allowDecimals={false} />
+                <Tooltip contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid #DFE1DC" }} />
+                <Bar dataKey="qtd" radius={[3, 3, 0, 0]} fill="#60A5FA" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    TAREFAS
    ============================================================ */
 
@@ -1153,17 +1299,48 @@ function Tarefas({ tasks, contacts, onAdd, onToggle, onRemove }) {
 function Dados({ profile, org, email }) {
   const [fullName, setFullName] = useState(profile?.full_name || "");
   const [companyName, setCompanyName] = useState(org?.name || "");
+  const [jobTitle, setJobTitle] = useState(profile?.job_title || "");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [pwError, setPwError] = useState("");
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwSaved, setPwSaved] = useState(false);
 
   const save = async () => {
     setSaving(true);
     setSaved(false);
-    await supabase.from("profiles").update({ full_name: fullName }).eq("id", profile.id);
+    await supabase.from("profiles").update({ full_name: fullName, job_title: jobTitle }).eq("id", profile.id);
     await supabase.from("organizations").update({ name: companyName }).eq("id", org.id);
     setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
+  };
+
+  const changePassword = async () => {
+    setPwError("");
+    setPwSaved(false);
+    if (newPassword.length < 6) {
+      setPwError("A senha precisa ter pelo menos 6 caracteres.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPwError("As senhas não são iguais.");
+      return;
+    }
+    setPwSaving(true);
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    setPwSaving(false);
+    if (error) {
+      setPwError(error.message);
+      return;
+    }
+    setNewPassword("");
+    setConfirmPassword("");
+    setPwSaved(true);
+    setTimeout(() => setPwSaved(false), 2500);
   };
 
   return (
@@ -1186,13 +1363,40 @@ function Dados({ profile, org, email }) {
         <Field label="Nome da empresa">
           <input style={styles.input} value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
         </Field>
+        <Field label="Seu cargo (opcional)">
+          <input
+            style={styles.input}
+            placeholder="Ex: Dono(a), Gerente, Vendedor…"
+            value={jobTitle}
+            onChange={(e) => setJobTitle(e.target.value)}
+          />
+        </Field>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 28 }}>
         <button style={styles.primaryBtn} onClick={save} disabled={saving}>
           {saving ? "Salvando…" : "Salvar alterações"}
         </button>
         {saved && <span style={{ fontSize: 13, color: "#15803D", fontWeight: 600 }}>Salvo!</span>}
+      </div>
+
+      <div style={styles.panel}>
+        <div style={styles.panelHeader}>Alterar senha</div>
+        <div style={styles.fieldRow}>
+          <Field label="Nova senha">
+            <input style={styles.input} type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+          </Field>
+          <Field label="Confirmar nova senha">
+            <input style={styles.input} type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+          </Field>
+        </div>
+        {pwError && <div style={styles.authError}>{pwError}</div>}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button style={styles.secondaryBtn} onClick={changePassword} disabled={pwSaving}>
+            {pwSaving ? "Alterando…" : "Alterar senha"}
+          </button>
+          {pwSaved && <span style={{ fontSize: 13, color: "#15803D", fontWeight: 600 }}>Senha alterada!</span>}
+        </div>
       </div>
     </div>
   );
