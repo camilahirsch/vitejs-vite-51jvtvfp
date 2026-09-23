@@ -31,6 +31,23 @@ import {
 } from "recharts";
 import { supabase } from "./supabaseClient";
 
+/* ============================================================
+   COBRANÇA (ainda não ativada)
+   Quando decidir o preço, crie um Payment Link no Stripe
+   (dashboard.stripe.com > Payment Links) e cole a URL abaixo.
+   Enquanto ficar como está ("#"), o botão "Assinar agora" não
+   faz nada de verdade — é só um placeholder visual.
+   ============================================================ */
+const STRIPE_PAYMENT_LINK = "#";
+const TRIAL_DAYS = 7;
+
+function daysLeft(trialEndsAt) {
+  if (!trialEndsAt) return null;
+  const end = new Date(trialEndsAt).getTime();
+  const now = Date.now();
+  return Math.ceil((end - now) / (24 * 3600 * 1000));
+}
+
 const STAGES = [
   { id: "novo", label: "Novo lead", color: "#6E7C91" },
   { id: "qualificado", label: "Qualificado", color: "#4C7A8C" },
@@ -87,6 +104,7 @@ function reminderState(dateStr) {
 export default function EloCRM() {
   const [session, setSession] = useState(undefined);
   const [profile, setProfile] = useState(null);
+  const [org, setOrg] = useState(null);
   const [contacts, setContacts] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [tab, setTab] = useState("painel");
@@ -109,6 +127,21 @@ export default function EloCRM() {
       setProfile(data || null);
     })();
   }, [session]);
+
+  useEffect(() => {
+    if (!profile) {
+      setOrg(null);
+      return;
+    }
+    (async () => {
+      const { data } = await supabase
+        .from("organizations")
+        .select("id, name, trial_ends_at, subscription_status")
+        .eq("id", profile.organization_id)
+        .single();
+      setOrg(data || null);
+    })();
+  }, [profile]);
 
   const loadData = useCallback(async () => {
     if (!profile) return;
@@ -203,13 +236,22 @@ export default function EloCRM() {
 
   if (session === undefined) return <LoadingScreen text="Carregando…" />;
   if (!session) return <AuthScreen />;
-  if (!profile) return <LoadingScreen text="Preparando sua conta…" />;
+  if (!profile || !org) return <LoadingScreen text="Preparando sua conta…" />;
+
+  const remaining = daysLeft(org.trial_ends_at);
+  const isActive = org.subscription_status === "active";
+  const trialExpired = !isActive && remaining !== null && remaining <= 0;
+
+  if (trialExpired) {
+    return <Paywall />;
+  }
 
   return (
     <div style={styles.app}>
       <style>{globalCss}</style>
       <Sidebar tab={tab} setTab={setTab} />
       <div style={styles.main}>
+        {!isActive && remaining !== null && <TrialBanner daysLeft={remaining} />}
         {tab === "painel" && <Painel contacts={contacts} tasks={tasks} />}
         {tab === "contatos" && (
           <Contatos contacts={contacts} onAdd={addContact} onEdit={editContact} onRemove={removeContact} />
@@ -218,6 +260,51 @@ export default function EloCRM() {
         {tab === "tarefas" && (
           <Tarefas tasks={tasks} contacts={contacts} onAdd={addTask} onToggle={toggleTask} onRemove={removeTask} />
         )}
+      </div>
+    </div>
+  );
+}
+
+function TrialBanner({ daysLeft }) {
+  return (
+    <div style={styles.trialBanner}>
+      <span>
+        {daysLeft > 0
+          ? `Seu período de teste termina em ${daysLeft} dia${daysLeft === 1 ? "" : "s"}.`
+          : "Seu período de teste termina hoje."}
+      </span>
+      <a href={STRIPE_PAYMENT_LINK} style={styles.trialBannerLink}>
+        Assinar agora
+      </a>
+    </div>
+  );
+}
+
+function Paywall() {
+  return (
+    <div style={styles.authWrap}>
+      <style>{globalCss}</style>
+      <div style={styles.authCard}>
+        <div style={styles.brand}>
+          <span style={styles.brandMark}>●</span>
+          <span style={{ color: "#1C2127" }}>Elo</span>
+        </div>
+        <p style={{ fontSize: 13.5, color: "#5B626B", lineHeight: 1.5, marginBottom: 18 }}>
+          Seu período de teste grátis acabou. Assine para continuar usando o Elo e manter acesso aos seus
+          contatos, funil e tarefas.
+        </p>
+        <a
+          href={STRIPE_PAYMENT_LINK}
+          style={{ ...styles.primaryBtn, width: "100%", justifyContent: "center", textDecoration: "none" }}
+        >
+          Assinar agora
+        </a>
+        <button
+          style={{ ...styles.secondaryBtn, width: "100%", justifyContent: "center", marginTop: 10 }}
+          onClick={() => supabase.auth.signOut()}
+        >
+          Sair
+        </button>
       </div>
     </div>
   );
@@ -951,6 +1038,8 @@ const styles = {
   authTabActive: { background: "#FFFFFF", color: "#1C2127", fontWeight: 600, boxShadow: "0 1px 2px rgba(0,0,0,0.06)" },
   authError: { fontSize: 12.5, color: "#B5493A", background: "#FBEDEA", borderRadius: 6, padding: "8px 10px", marginBottom: 10 },
   authInfo: { fontSize: 12.5, color: "#2F6F63", background: "#E7F1EE", borderRadius: 6, padding: "8px 10px", marginBottom: 10 },
+  trialBanner: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, background: "#FFF7E8", border: "1px solid #F0DCA8", color: "#8A6A1F", borderRadius: 8, padding: "10px 16px", fontSize: 13, marginBottom: 18, flexWrap: "wrap" },
+  trialBannerLink: { color: "#2F6F63", fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap" },
 };
 
 const globalCss = `
