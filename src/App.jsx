@@ -418,6 +418,7 @@ function AuthScreen() {
             <span style={styles.brandMark}>●</span>
             <span style={{ color: "#FFFFFF" }}>Elo</span>
           </div>
+          <div style={styles.authByHirsch}>by Hirsch</div>
           <h1 style={styles.authPitchTitle}>Um sistema simples para quem cuida do negócio sozinho.</h1>
           <p style={styles.authPitchSub}>
             O Elo existe para facilitar o dia a dia de pequenos empreendedores: uma ferramenta rápida e direta,
@@ -438,6 +439,7 @@ function AuthScreen() {
               <span>Pensado para quem trabalha sozinho ou em equipes pequenas</span>
             </div>
           </div>
+          <div style={styles.authSupportNote}>Suporte próximo, sempre que você precisar.</div>
         </div>
       </div>
 
@@ -582,7 +584,7 @@ function Painel({ contacts, tasks }) {
     .filter((c) => c.next_reminder_date && reminderState(c.next_reminder_date) !== "futuro")
     .sort((a, b) => a.next_reminder_date.localeCompare(b.next_reminder_date));
 
-  const chartData = STAGES.filter((s) => s.id !== "perdido").map((s) => ({
+  const chartData = STAGES.map((s) => ({
     name: s.label,
     valor: scoped.filter((c) => c.stage === s.id).reduce((sum, c) => sum + Number(c.value || 0), 0),
     color: s.color,
@@ -762,7 +764,9 @@ function DateRangePicker({ mode, from, to, onChangeMode, onChangeFrom, onChangeT
 
 function Contatos({ contacts, onAdd, onEdit, onRemove }) {
   const [query, setQuery] = useState("");
-  const [dateFilter, setDateFilter] = useState("all"); // all | 7d | 30d | month
+  const [dateMode, setDateMode] = useState("all");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
   const [reminderOnly, setReminderOnly] = useState(false);
   const [editing, setEditing] = useState(null);
   const [showForm, setShowForm] = useState(false);
@@ -774,9 +778,7 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
     const matchesQuery = c.name.toLowerCase().includes(q) || (c.company || "").toLowerCase().includes(q);
     if (!matchesQuery) return false;
 
-    if (dateFilter === "7d" && !withinDays(c.created_at, 7)) return false;
-    if (dateFilter === "30d" && !withinDays(c.created_at, 30)) return false;
-    if (dateFilter === "month" && !isSameMonth(c.created_at)) return false;
+    if (!inDateRange(c.created_at, dateMode, customFrom, customTo)) return false;
 
     if (reminderOnly) {
       const state = c.next_reminder_date ? reminderState(c.next_reminder_date) : null;
@@ -845,12 +847,14 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
           <Search size={15} color="#9AA0A6" />
           <input placeholder="Buscar por nome ou empresa…" value={query} onChange={(e) => setQuery(e.target.value)} style={styles.searchInput} />
         </div>
-        <select style={styles.filterSelect} value={dateFilter} onChange={(e) => setDateFilter(e.target.value)}>
-          <option value="all">Data de entrada: todas</option>
-          <option value="7d">Últimos 7 dias</option>
-          <option value="30d">Últimos 30 dias</option>
-          <option value="month">Este mês</option>
-        </select>
+        <DateRangePicker
+          mode={dateMode}
+          from={customFrom}
+          to={customTo}
+          onChangeMode={setDateMode}
+          onChangeFrom={setCustomFrom}
+          onChangeTo={setCustomTo}
+        />
         <button
           style={{ ...styles.filterToggle, ...(reminderOnly ? styles.filterToggleActive : {}) }}
           onClick={() => setReminderOnly((v) => !v)}
@@ -1359,7 +1363,8 @@ const FONT_STACK = "'Montserrat', -apple-system, BlinkMacSystemFont, \"Segoe UI\
 const styles = {
   app: {
     display: "flex",
-    minHeight: 560,
+    minHeight: "100vh",
+    width: "100%",
     fontFamily: FONT_STACK,
     background: "#F3F4F1",
     color: "#0D0C1F",
@@ -1441,8 +1446,8 @@ const styles = {
   taskAddRow: { display: "flex", gap: 8, flexWrap: "wrap" },
   taskRow: { display: "flex", alignItems: "center", gap: 10, padding: "9px 2px", borderTop: "1px solid #EFF0EC", fontSize: 13.5 },
   checkBtn: { border: "none", background: "transparent", cursor: "pointer", padding: 2, display: "flex" },
-  authWrap: { minHeight: 560, display: "flex", alignItems: "center", justifyContent: "center", background: "#F3F4F1", fontFamily: FONT_STACK },
-  authPage: { minHeight: "100vh", display: "flex", fontFamily: FONT_STACK, background: "#F3F4F1" },
+  authWrap: { minHeight: "100vh", width: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "#F3F4F1", fontFamily: FONT_STACK },
+  authPage: { minHeight: "100vh", width: "100%", display: "flex", fontFamily: FONT_STACK, background: "#F3F4F1" },
   authBrandPanel: {
     flex: "1 1 50%",
     background: "#0D0C1F",
@@ -1452,6 +1457,8 @@ const styles = {
     padding: "48px",
   },
   authBrandContent: { maxWidth: 440, margin: "0 auto" },
+  authByHirsch: { fontSize: 11.5, color: "#7C8493", fontWeight: 600, letterSpacing: "0.02em", marginTop: 6 },
+  authSupportNote: { fontSize: 12, color: "#7C8493", marginTop: 30 },
   authPitchTitle: { fontSize: 28, fontWeight: 700, letterSpacing: "-0.01em", lineHeight: 1.25, margin: "28px 0 14px 0" },
   authPitchSub: { fontSize: 14, color: "#B8BEC9", lineHeight: 1.6, marginBottom: 26 },
   authPitchList: { display: "flex", flexDirection: "column", gap: 12 },
@@ -1483,6 +1490,16 @@ const globalCss = `
   @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
   html { color-scheme: light; }
   * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; width: 100%; min-height: 100%; }
+  #root {
+    max-width: none !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    text-align: left !important;
+    display: block !important;
+  }
+  body { display: block !important; place-items: unset !important; }
   input, select, textarea, button { font-family: inherit; color: #0D0C1F; }
   input::placeholder, textarea::placeholder { color: #9AA0A6; opacity: 1; }
   input:focus, select:focus, textarea:focus { border-color: #22C55E !important; }
