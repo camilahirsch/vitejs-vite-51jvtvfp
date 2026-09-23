@@ -49,12 +49,13 @@ function daysLeft(trialEndsAt) {
 }
 
 const STAGES = [
-  { id: "novo", label: "Novo lead", color: "#6E7C91" },
-  { id: "qualificado", label: "Qualificado", color: "#4C7A8C" },
-  { id: "proposta", label: "Proposta enviada", color: "#2F6F63" },
-  { id: "negociacao", label: "Em negociação", color: "#B8823A" },
-  { id: "ganho", label: "Ganho", color: "#3C8558" },
-  { id: "perdido", label: "Perda", color: "#B5493A" },
+  { id: "novo", label: "Novo lead", color: "#94A3B8" },
+  { id: "contato_feito", label: "Contato feito", color: "#60A5FA" },
+  { id: "qualificado", label: "Qualificado", color: "#38BDF8" },
+  { id: "proposta", label: "Proposta enviada", color: "#4ADE80" },
+  { id: "negociacao", label: "Em negociação", color: "#22C55E" },
+  { id: "ganho", label: "Ganho", color: "#15803D" },
+  { id: "perdido", label: "Perda", color: "#DC2626" },
 ];
 
 const stageInfo = (id) => STAGES.find((s) => s.id === id) || STAGES[0];
@@ -963,22 +964,24 @@ function Field({ label, children }) {
    ESTILOS
    ============================================================ */
 
+const FONT_STACK = "'Montserrat', -apple-system, BlinkMacSystemFont, \"Segoe UI\", Helvetica, Arial, sans-serif";
+
 const styles = {
   app: {
     display: "flex",
     minHeight: 560,
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif',
+    fontFamily: FONT_STACK,
     background: "#F3F4F1",
-    color: "#1C2127",
+    color: "#0D0C1F",
     fontSize: 14,
   },
-  sidebar: { width: 210, flexShrink: 0, background: "#1C2127", color: "#EDEEEA", display: "flex", flexDirection: "column", padding: "20px 14px" },
-  brand: { display: "flex", alignItems: "center", gap: 8, fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em", padding: "0 6px 22px 6px" },
-  brandMark: { color: "#5FA394", fontSize: 12 },
+  sidebar: { width: 210, flexShrink: 0, background: "#0D0C1F", color: "#EDEEEA", display: "flex", flexDirection: "column", padding: "20px 14px" },
+  brand: { display: "flex", alignItems: "center", gap: 8, fontSize: 18, fontWeight: 700, letterSpacing: "-0.01em", padding: "0 6px 22px 6px" },
+  brandMark: { color: "#22C55E", fontSize: 12 },
   nav: { display: "flex", flexDirection: "column", gap: 2 },
-  navBtn: { display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 6, border: "none", background: "transparent", color: "#B9BDC2", fontSize: 13.5, cursor: "pointer", textAlign: "left" },
-  navBtnActive: { background: "#2A303A", color: "#FFFFFF" },
-  logoutBtn: { marginTop: "auto", display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 6, border: "none", background: "transparent", color: "#8B9096", fontSize: 13, cursor: "pointer" },
+  navBtn: { display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, border: "none", background: "transparent", color: "#9CA3AF", fontSize: 13.5, cursor: "pointer", textAlign: "left" },
+  navBtnActive: { background: "#1C2432", color: "#FFFFFF", fontWeight: 600 },
+  logoutBtn: { marginTop: "auto", display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, border: "none", background: "transparent", color: "#6B7280", fontSize: 13, cursor: "pointer" },
   main: { flex: 1, padding: "26px 32px", overflowY: "auto" },
   h1: { fontSize: 21, fontWeight: 600, margin: 0, letterSpacing: "-0.01em" },
   sub: { fontSize: 13, color: "#6B7178", margin: "4px 0 18px 0" },
@@ -998,7 +1001,7 @@ const styles = {
   searchInput: { border: "none", outline: "none", flex: 1, fontSize: 13.5, background: "transparent", color: "#1C2127" },
   filterSelect: { border: "1px solid #E2E3DE", borderRadius: 7, padding: "8px 10px", fontSize: 12.5, background: "#FFFFFF", color: "#5B626B" },
   filterToggle: { display: "flex", alignItems: "center", gap: 6, border: "1px solid #E2E3DE", borderRadius: 7, padding: "8px 12px", fontSize: 12.5, background: "#FFFFFF", color: "#5B626B", cursor: "pointer" },
-  filterToggleActive: { background: "#E7F1EE", borderColor: "#2F6F63", color: "#2F6F63" },
+  filterToggleActive: { background: "#EFFDF4", borderColor: "#22C55E", color: "#15803D" },
   contactRow: { display: "flex", alignItems: "center", gap: 12, padding: "10px 4px", borderTop: "1px solid #EFF0EC" },
   stageTab: { width: 4, alignSelf: "stretch", borderRadius: 2, minHeight: 30 },
   contactName: { fontWeight: 600, fontSize: 13.5 },
@@ -1009,9 +1012,9 @@ const styles = {
   contactValue: { fontWeight: 600, fontSize: 13, width: 90, textAlign: "right" },
   badge: { fontSize: 11, padding: "3px 9px", borderRadius: 20, border: "1px solid", whiteSpace: "nowrap" },
   iconBtn: { border: "none", background: "transparent", color: "#9AA0A6", cursor: "pointer", padding: 5, borderRadius: 5 },
-  primaryBtn: { display: "flex", alignItems: "center", gap: 6, background: "#2F6F63", color: "#FFFFFF", border: "none", borderRadius: 7, padding: "9px 14px", fontSize: 13.5, fontWeight: 500, cursor: "pointer" },
-  secondaryBtn: { background: "transparent", color: "#5B626B", border: "1px solid #DFE1DC", borderRadius: 7, padding: "9px 14px", fontSize: 13.5, cursor: "pointer" },
-  input: { width: "100%", boxSizing: "border-box", border: "1px solid #DFE1DC", borderRadius: 6, padding: "8px 10px", fontSize: 13.5, fontFamily: "inherit", outline: "none", background: "#FCFCFB", color: "#1C2127", colorScheme: "light" },
+  primaryBtn: { display: "flex", alignItems: "center", gap: 6, background: "#22C55E", color: "#0D0C1F", border: "none", borderRadius: 8, padding: "9px 14px", fontSize: 13.5, fontWeight: 700, cursor: "pointer" },
+  secondaryBtn: { background: "transparent", color: "#5B626B", border: "1px solid #DFE1DC", borderRadius: 8, padding: "9px 14px", fontSize: 13.5, cursor: "pointer" },
+  input: { width: "100%", boxSizing: "border-box", border: "1px solid #DFE1DC", borderRadius: 6, padding: "8px 10px", fontSize: 13.5, fontFamily: "inherit", outline: "none", background: "#FCFCFB", color: "#0D0C1F", colorScheme: "light" },
   fieldRow: { display: "flex", gap: 12 },
   fieldLabel: { fontSize: 12, color: "#6B7178", marginBottom: 5 },
   modalOverlay: { position: "fixed", inset: 0, background: "rgba(28,33,39,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 },
@@ -1031,23 +1034,34 @@ const styles = {
   taskAddRow: { display: "flex", gap: 8, flexWrap: "wrap" },
   taskRow: { display: "flex", alignItems: "center", gap: 10, padding: "9px 2px", borderTop: "1px solid #EFF0EC", fontSize: 13.5 },
   checkBtn: { border: "none", background: "transparent", cursor: "pointer", padding: 2, display: "flex" },
-  authWrap: { minHeight: 560, display: "flex", alignItems: "center", justifyContent: "center", background: "#F3F4F1", fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif' },
+  authWrap: { minHeight: 560, display: "flex", alignItems: "center", justifyContent: "center", background: "#F3F4F1", fontFamily: FONT_STACK },
   authCard: { background: "#FFFFFF", border: "1px solid #E2E3DE", borderRadius: 10, padding: 28, width: 340 },
   authTabs: { display: "flex", gap: 4, background: "#F0F1EC", borderRadius: 7, padding: 3, marginBottom: 18 },
   authTab: { flex: 1, border: "none", background: "transparent", padding: "7px 0", borderRadius: 5, fontSize: 13, color: "#6B7178", cursor: "pointer" },
-  authTabActive: { background: "#FFFFFF", color: "#1C2127", fontWeight: 600, boxShadow: "0 1px 2px rgba(0,0,0,0.06)" },
-  authError: { fontSize: 12.5, color: "#B5493A", background: "#FBEDEA", borderRadius: 6, padding: "8px 10px", marginBottom: 10 },
-  authInfo: { fontSize: 12.5, color: "#2F6F63", background: "#E7F1EE", borderRadius: 6, padding: "8px 10px", marginBottom: 10 },
+  authTabActive: { background: "#FFFFFF", color: "#0D0C1F", fontWeight: 600, boxShadow: "0 1px 2px rgba(0,0,0,0.06)" },
+  authError: { fontSize: 12.5, color: "#DC2626", background: "#FEF2F2", borderRadius: 6, padding: "8px 10px", marginBottom: 10 },
+  authInfo: { fontSize: 12.5, color: "#15803D", background: "#EFFDF4", borderRadius: 6, padding: "8px 10px", marginBottom: 10 },
   trialBanner: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, background: "#FFF7E8", border: "1px solid #F0DCA8", color: "#8A6A1F", borderRadius: 8, padding: "10px 16px", fontSize: 13, marginBottom: 18, flexWrap: "wrap" },
-  trialBannerLink: { color: "#2F6F63", fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap" },
+  trialBannerLink: { color: "#15803D", fontWeight: 700, textDecoration: "none", whiteSpace: "nowrap" },
+  datePicker: { position: "relative" },
+  dateBtn: { display: "flex", alignItems: "center", gap: 8, background: "#FFFFFF", border: "1px solid #D1D5DB", borderRadius: 8, padding: "9px 14px", fontSize: 13, fontWeight: 600, color: "#0D0C1F", cursor: "pointer" },
+  dateChev: { color: "#22C55E", fontSize: 11 },
+  dateDropdown: { position: "absolute", right: 0, top: "calc(100% + 6px)", background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.10)", width: 270, padding: 8, zIndex: 20 },
+  dateOpt: { padding: "9px 10px", borderRadius: 6, fontSize: 13, color: "#374151", cursor: "pointer" },
+  dateOptActive: { background: "#EFFDF4", color: "#15803D", fontWeight: 700 },
+  dateCustom: { borderTop: "1px solid #F1F2F0", marginTop: 6, paddingTop: 10, padding: 10 },
+  dateCustomLabel: { fontSize: 11, color: "#6B7280", marginBottom: 6, fontWeight: 600 },
+  dateInputs: { display: "flex", gap: 8, alignItems: "center" },
+  dateInput: { flex: 1, border: "1px solid #D1D5DB", borderRadius: 6, padding: "6px 8px", fontSize: 12, color: "#0D0C1F" },
 };
 
 const globalCss = `
+  @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
   html { color-scheme: light; }
   * { box-sizing: border-box; }
-  input, select, textarea, button { font-family: inherit; color: #1C2127; }
+  input, select, textarea, button { font-family: inherit; color: #0D0C1F; }
   input::placeholder, textarea::placeholder { color: #9AA0A6; opacity: 1; }
-  input:focus, select:focus, textarea:focus { border-color: #2F6F63 !important; }
+  input:focus, select:focus, textarea:focus { border-color: #22C55E !important; }
   @media (max-width: 640px) {
     .elo-sidebar { width: 60px !important; padding: 16px 8px !important; }
     .elo-nav-label { display: none; }
