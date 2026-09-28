@@ -1132,8 +1132,18 @@ const REGION_COLORS = ["#22C55E", "#7C3AED", "#0EA5E9", "#F59E0B", "#EC4899", "#
 
 function fmtBRLShort(v) {
   const n = Number(v || 0);
-  if (n >= 1000) return "R$" + (n / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "k";
+  if (n >= 1000) return "R$ " + (n / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "k";
   return fmtMoney(n);
+}
+
+// Cabeçalho de card: título em negrito à esquerda, legenda cinza à direita
+function CardHead({ title, sub }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+      <div style={{ ...styles.panelHeader, marginBottom: 0 }}>{title}</div>
+      {sub && <span style={{ fontSize: 12, color: "#9AA0A6" }}>{sub}</span>}
+    </div>
+  );
 }
 
 // Tooltip simples reutilizado pelos 3 gráficos customizados
@@ -1267,7 +1277,7 @@ function GraficoValorMensal({ dados }) {
   return (
     <div style={{ width: "100%", overflowX: "auto" }}>
       <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", minWidth: 480, overflow: "visible" }}>
-        <Eixos w={w} h={h} padL={padL} padR={padR} padT={padT} padB={padB} maxVal={maxVal} formatarTick={(v) => "R$" + Math.round(v / 1000) + "k"} />
+        <Eixos w={w} h={h} padL={padL} padR={padR} padT={padT} padB={padB} maxVal={maxVal} formatarTick={(v) => "R$ " + Math.round(v / 1000) + "k"} />
         <path d={`M ${xAt(0)},${padT + plotH} L ${pontos} L ${xAt(n - 1)},${padT + plotH} Z`} fill={HIRSCH_GREEN} opacity={0.12} />
         <path d={`M ${pontos}`} fill="none" stroke={HIRSCH_GREEN} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
         {dados.map((d, i) => {
@@ -1444,7 +1454,7 @@ function Graficos({ contacts }) {
       <p style={styles.sub}>Uma visão simples do seu negócio ao longo do tempo.</p>
 
       <div style={styles.panel}>
-        <div style={styles.panelHeader}>Funil de vendas</div>
+        <CardHead title="Funil de vendas" sub="do primeiro contato ao fechamento" />
         {funnelMax === 0 ? (
           <EmptyRow text="Ainda não há contatos no funil." />
         ) : (
@@ -1453,12 +1463,12 @@ function Graficos({ contacts }) {
       </div>
 
       <div style={styles.panel}>
-        <div style={styles.panelHeader}>Valor fechado por mês</div>
+        <CardHead title="Valor fechado por mês" sub="negociações ganhas, ano corrente · R$" />
         <GraficoValorMensal dados={revenueData} />
       </div>
 
       <div style={styles.panel}>
-        <div style={styles.panelHeader}>Negociações abertas por mês</div>
+        <CardHead title="Negociações abertas por mês" sub="quantidade de novos negócios, ano corrente" />
         <GraficoNegociacoesMensal dados={dealsPerMonthData} />
       </div>
 
@@ -1488,7 +1498,10 @@ function Graficos({ contacts }) {
       </div>
 
       <div style={styles.panel}>
-        <div style={styles.panelHeader}>Leads por região</div>
+        <CardHead
+          title="Leads por região"
+          sub={`identificada pelo DDD do WhatsApp · ${regionData.reduce((s, d) => s + d.total, 0)} leads`}
+        />
         {regionData.length === 0 ? <EmptyRow text="Nenhum telefone com DDD identificável ainda." /> : <GraficoRegiaoPizza regionData={regionData} />}
       </div>
 
