@@ -34,6 +34,11 @@ import {
   Tooltip,
   ResponsiveContainer,
   CartesianGrid,
+  PieChart,
+  Pie,
+  Legend,
+  AreaChart,
+  Area,
 } from "recharts";
 import { supabase } from "./supabaseClient";
 import { agruparPorRegiao } from "./ddd";
@@ -1122,6 +1127,18 @@ function Funil({ contacts, onEdit }) {
    GRÁFICOS
    ============================================================ */
 
+const REGION_COLORS = [
+  "#2a78d6", // azul
+  "#eb6834", // laranja
+  "#1baf7a", // verde-água
+  "#eda100", // amarelo
+  "#e87ba4", // magenta
+  "#4a3aa7", // violeta
+  "#e34948", // vermelho
+  "#008300", // verde
+  "#94A3B8", // cinza (não identificado)
+];
+
 function Graficos({ contacts }) {
   const months = lastMonthKeys(12);
 
@@ -1231,16 +1248,25 @@ function Graficos({ contacts }) {
       </div>
 
       <div style={styles.panel}>
-        <div style={styles.panelHeader}>Faturamento fechado por mês</div>
+        <div style={styles.panelHeader}>Valor fechado por mês</div>
         <div style={{ width: "100%", height: 220 }}>
           <ResponsiveContainer>
-            <BarChart data={revenueData} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
+            <AreaChart data={revenueData} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
               <CartesianGrid stroke="#E7E8E3" vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#5B626B" }} interval={0} angle={-30} textAnchor="end" height={50} />
               <YAxis tick={{ fontSize: 11, fill: "#5B626B" }} tickFormatter={(v) => `R$${v >= 1000 ? `${Math.round(v / 1000)}k` : v}`} />
               <Tooltip formatter={(v) => fmtMoney(v)} contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid #DFE1DC" }} />
-              <Bar dataKey="valor" radius={[3, 3, 0, 0]} fill="#22C55E" />
-            </BarChart>
+              <Area
+                type="monotone"
+                dataKey="valor"
+                stroke="#22C55E"
+                strokeWidth={2}
+                fill="#22C55E"
+                fillOpacity={0.12}
+                dot={{ r: 3, fill: "#22C55E", strokeWidth: 0 }}
+                activeDot={{ r: 5 }}
+              />
+            </AreaChart>
           </ResponsiveContainer>
         </div>
       </div>
@@ -1290,15 +1316,31 @@ function Graficos({ contacts }) {
         {regionData.length === 0 ? (
           <EmptyRow text="Nenhum telefone com DDD identificável ainda." />
         ) : (
-          <div style={{ width: "100%", height: Math.max(160, regionData.length * 34) }}>
+          <div style={{ width: "100%", height: 280 }}>
             <ResponsiveContainer>
-              <BarChart data={regionData} layout="vertical" margin={{ top: 8, right: 24, left: 8, bottom: 0 }}>
-                <CartesianGrid stroke="#E7E8E3" horizontal={false} />
-                <XAxis type="number" tick={{ fontSize: 11, fill: "#5B626B" }} allowDecimals={false} />
-                <YAxis type="category" dataKey="nome" tick={{ fontSize: 12, fill: "#374151" }} width={120} />
-                <Tooltip contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid #DFE1DC" }} />
-                <Bar dataKey="total" radius={[0, 4, 4, 0]} fill="#818CF8" />
-              </BarChart>
+              <PieChart>
+                <Pie
+                  data={regionData}
+                  dataKey="total"
+                  nameKey="nome"
+                  cx="38%"
+                  cy="50%"
+                  innerRadius={50}
+                  outerRadius={85}
+                  paddingAngle={2}
+                  label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
+                  labelLine={false}
+                >
+                  {regionData.map((entry, i) => (
+                    <Cell key={i} fill={REGION_COLORS[i % REGION_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Legend layout="vertical" align="right" verticalAlign="middle" wrapperStyle={{ fontSize: 12 }} />
+                <Tooltip
+                  formatter={(value, _name, props) => [`${value} leads`, props.payload.nome]}
+                  contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid #DFE1DC" }}
+                />
+              </PieChart>
             </ResponsiveContainer>
           </div>
         )}
