@@ -36,6 +36,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import { supabase } from "./supabaseClient";
+import { agruparPorRegiao } from "./ddd";
 
 /* ============================================================
    COBRANÇA (ainda não ativada)
@@ -1122,12 +1123,18 @@ function Funil({ contacts, onEdit }) {
    ============================================================ */
 
 function Graficos({ contacts }) {
-  const months = lastMonthKeys(6);
+  const months = lastMonthKeys(12);
+
   const revenueData = months.map((key) => ({
     name: monthLabel(key),
     valor: contacts
       .filter((c) => c.stage === "ganho" && monthKey(c.created_at) === key)
       .reduce((s, c) => s + Number(c.value || 0), 0),
+  }));
+
+  const dealsPerMonthData = months.map((key) => ({
+    name: monthLabel(key),
+    qtd: contacts.filter((c) => monthKey(c.created_at) === key).length,
   }));
 
   const won = contacts.filter((c) => c.stage === "ganho");
@@ -1138,11 +1145,26 @@ function Graficos({ contacts }) {
     { name: "Ganho", qtd: won.length, color: "#15803D" },
     { name: "Perdido", qtd: lost.length, color: "#DC2626" },
   ];
+  const ticketMedio = won.length > 0 ? won.reduce((s, c) => s + Number(c.value || 0), 0) / won.length : 0;
 
   const sourceData = LEAD_SOURCES.map((s) => ({
     name: s.label,
     qtd: contacts.filter((c) => (c.lead_source || "") === s.id).length,
   })).filter((s) => s.qtd > 0);
+
+  const regionData = agruparPorRegiao(contacts.map((c) => c.phone));
+
+  // Funil: todas as etapas exceto "perdido" (perda não é um degrau do funil, é uma saída)
+  const funnelStages = STAGES.filter((s) => s.id !== "perdido");
+  const funnelData = funnelStages.map((s) => ({
+    id: s.id,
+    label: s.label,
+    color: s.color,
+    total: contacts.filter((c) => c.stage === s.id).length,
+  }));
+  const funnelMax = funnelData[0]?.total || 1;
+  const conversaoFunilPct =
+    funnelMax > 0 ? Math.round((funnelData[funnelData.length - 1].total / funnelMax) * 100) : 0;
 
   return (
     <div>
@@ -1150,15 +1172,89 @@ function Graficos({ contacts }) {
       <p style={styles.sub}>Uma visão simples do seu negócio ao longo do tempo.</p>
 
       <div style={styles.panel}>
+        <div style={styles.panelHeader}>Funil de vendas</div>
+        {funnelMax === 0 ? (
+          <EmptyRow text="Ainda não há contatos no funil." />
+        ) : (
+          <>
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              {funnelData.map((etapa, i) => {
+                const larguraPct = 30 + 70 * (etapa.total / funnelMax);
+                const anterior = funnelData[i - 1];
+                return (
+                  <div key={etapa.id}>
+                    {i > 0 && anterior && (
+                      <div style={{ textAlign: "center", fontSize: 11, color: "#9AA0A6", padding: "4px 0" }}>
+                        ↓ {anterior.total > 0 ? Math.round((etapa.total / anterior.total) * 100) : 0}% avançam
+                      </div>
+                    )}
+                    <div style={{ display: "flex", justifyContent: "center" }}>
+                      <div
+                        style={{
+                          width: `${larguraPct}%`,
+                          height: 40,
+                          borderRadius: 4,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 8,
+                          background: etapa.color,
+                          color: "#fff",
+                          fontSize: 12,
+                          fontWeight: 600,
+                        }}
+                      >
+                        <span>{etapa.label}</span>
+                        <span>{etapa.total}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", gap: 24, marginTop: 16, paddingTop: 12, borderTop: "1px solid #DFE1DC" }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 16, color: "#1C2127" }}>{conversaoFunilPct}%</div>
+                <div style={{ fontSize: 11, color: "#9AA0A6" }}>conversão lead → ganho</div>
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 16, color: "#1C2127" }}>{lost.length}</div>
+                <div style={{ fontSize: 11, color: "#9AA0A6" }}>perdidos no período</div>
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 16, color: "#1C2127" }}>{fmtMoney(ticketMedio)}</div>
+                <div style={{ fontSize: 11, color: "#9AA0A6" }}>ticket médio fechado</div>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div style={styles.panel}>
         <div style={styles.panelHeader}>Faturamento fechado por mês</div>
-        <div style={{ width: "100%", height: 200 }}>
+        <div style={{ width: "100%", height: 220 }}>
           <ResponsiveContainer>
             <BarChart data={revenueData} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
               <CartesianGrid stroke="#E7E8E3" vertical={false} />
-              <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#5B626B" }} />
+              <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#5B626B" }} interval={0} angle={-30} textAnchor="end" height={50} />
               <YAxis tick={{ fontSize: 11, fill: "#5B626B" }} tickFormatter={(v) => `R$${v >= 1000 ? `${Math.round(v / 1000)}k` : v}`} />
               <Tooltip formatter={(v) => fmtMoney(v)} contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid #DFE1DC" }} />
               <Bar dataKey="valor" radius={[3, 3, 0, 0]} fill="#22C55E" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div style={styles.panel}>
+        <div style={styles.panelHeader}>Negociações abertas por mês</div>
+        <div style={{ width: "100%", height: 220 }}>
+          <ResponsiveContainer>
+            <BarChart data={dealsPerMonthData} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
+              <CartesianGrid stroke="#E7E8E3" vertical={false} />
+              <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#5B626B" }} interval={0} angle={-30} textAnchor="end" height={50} />
+              <YAxis tick={{ fontSize: 11, fill: "#5B626B" }} allowDecimals={false} />
+              <Tooltip contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid #DFE1DC" }} />
+              <Bar dataKey="qtd" radius={[3, 3, 0, 0]} fill="#38BDF8" />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -1183,6 +1279,25 @@ function Graficos({ contacts }) {
                     <Cell key={i} fill={entry.color} />
                   ))}
                 </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
+      <div style={styles.panel}>
+        <div style={styles.panelHeader}>Leads por região</div>
+        {regionData.length === 0 ? (
+          <EmptyRow text="Nenhum telefone com DDD identificável ainda." />
+        ) : (
+          <div style={{ width: "100%", height: Math.max(160, regionData.length * 34) }}>
+            <ResponsiveContainer>
+              <BarChart data={regionData} layout="vertical" margin={{ top: 8, right: 24, left: 8, bottom: 0 }}>
+                <CartesianGrid stroke="#E7E8E3" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 11, fill: "#5B626B" }} allowDecimals={false} />
+                <YAxis type="category" dataKey="nome" tick={{ fontSize: 12, fill: "#374151" }} width={120} />
+                <Tooltip contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid #DFE1DC" }} />
+                <Bar dataKey="total" radius={[0, 4, 4, 0]} fill="#818CF8" />
               </BarChart>
             </ResponsiveContainer>
           </div>
