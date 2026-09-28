@@ -1118,6 +1118,10 @@ function Funil({ contacts, onEdit }) {
   );
 }
 
+/* ============================================================
+   GRÁFICOS
+   ============================================================ */
+
 // Paleta Hirsch: verde principal (mesmo tom do botão "Solicitar Diagnóstico" do site),
 // roxo de apoio (mesmo tom do gradiente/ilustração do site).
 const HIRSCH_GREEN = "#22C55E";
@@ -1276,7 +1280,7 @@ function GraficoValorMensal({ dados }) {
 
   return (
     <div style={{ width: "100%", overflowX: "auto" }}>
-      <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", minWidth: 480, overflow: "visible" }}>
+      <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", minWidth: 260, overflow: "visible" }}>
         <Eixos w={w} h={h} padL={padL} padR={padR} padT={padT} padB={padB} maxVal={maxVal} formatarTick={(v) => "R$ " + Math.round(v / 1000) + "k"} />
         <path d={`M ${xAt(0)},${padT + plotH} L ${pontos} L ${xAt(n - 1)},${padT + plotH} Z`} fill={HIRSCH_GREEN} opacity={0.12} />
         <path d={`M ${pontos}`} fill="none" stroke={HIRSCH_GREEN} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
@@ -1321,7 +1325,7 @@ function GraficoNegociacoesMensal({ dados }) {
 
   return (
     <div style={{ width: "100%", overflowX: "auto" }}>
-      <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", minWidth: 480, overflow: "visible" }}>
+      <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", minWidth: 260, overflow: "visible" }}>
         <Eixos w={w} h={h} padL={padL} padR={padR} padT={padT} padB={padB} maxVal={maxVal} formatarTick={(v) => String(Math.round(v))} />
         {dados.map((d, i) => {
           const cx = padL + slot * i + slot / 2;
@@ -1448,65 +1452,38 @@ function Graficos({ contacts }) {
   const funnelMax = funnelData[0]?.total || 1;
   const conversaoFunilPct = funnelMax > 0 ? Math.round((funnelData[funnelData.length - 1].total / funnelMax) * 100) : 0;
 
+  const totalRegiao = regionData.reduce((s, d) => s + d.total, 0);
+  const rowStyle = { display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" };
+  const halfPanel = { ...styles.panel, flex: "1 1 360px", minWidth: 0 };
+
   return (
     <div>
       <h1 style={styles.h1}>Gráficos</h1>
       <p style={styles.sub}>Uma visão simples do seu negócio ao longo do tempo.</p>
 
-      <div style={styles.panel}>
-        <CardHead title="Funil de vendas" sub="do primeiro contato ao fechamento" />
-        {funnelMax === 0 ? (
-          <EmptyRow text="Ainda não há contatos no funil." />
-        ) : (
-          <GraficoFunil funnelData={funnelData} conversaoFunilPct={conversaoFunilPct} perdidos={lost.length} ticketMedio={ticketMedio} />
-        )}
+      <div style={rowStyle}>
+        <div style={halfPanel}>
+          <CardHead title="Funil de vendas" sub="do primeiro contato ao fechamento" />
+          {funnelMax === 0 ? (
+            <EmptyRow text="Ainda não há contatos no funil." />
+          ) : (
+            <GraficoFunil funnelData={funnelData} conversaoFunilPct={conversaoFunilPct} perdidos={lost.length} ticketMedio={ticketMedio} />
+          )}
+        </div>
+
+        <div style={halfPanel}>
+          <CardHead title="Leads" sub="quantidade de leads recebidos por mês" />
+          <GraficoNegociacoesMensal dados={dealsPerMonthData} />
+        </div>
       </div>
 
       <div style={styles.panel}>
-        <CardHead title="Valor fechado por mês" sub="negociações ganhas, ano corrente · R$" />
+        <CardHead title="Valor fechado por mês" sub="negociações ganhas, de janeiro a dezembro · R$" />
         <GraficoValorMensal dados={revenueData} />
       </div>
 
       <div style={styles.panel}>
-        <CardHead title="Negociações abertas por mês" sub="quantidade de novos negócios, ano corrente" />
-        <GraficoNegociacoesMensal dados={dealsPerMonthData} />
-      </div>
-
-      <div style={styles.panel}>
-        <div style={styles.panelHeader}>
-          Fechamento {conversionRate !== null && <span style={{ color: "#5B626B", fontWeight: 400 }}>— {conversionRate.toFixed(0)}% de conversão</span>}
-        </div>
-        {closedTotal === 0 ? (
-          <EmptyRow text="Ainda não há contatos fechados (ganhos ou perdidos)." />
-        ) : (
-          <div style={{ width: "100%", height: 160 }}>
-            <ResponsiveContainer>
-              <BarChart data={closingData} layout="vertical" margin={{ top: 8, right: 24, left: 8, bottom: 0 }}>
-                <CartesianGrid stroke="#E7E8E3" horizontal={false} />
-                <XAxis type="number" tick={{ fontSize: 11, fill: "#5B626B" }} allowDecimals={false} />
-                <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fill: "#374151" }} width={70} />
-                <Tooltip contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid #DFE1DC" }} />
-                <Bar dataKey="qtd" radius={[0, 4, 4, 0]}>
-                  {closingData.map((entry, i) => (
-                    <Cell key={i} fill={entry.color} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </div>
-
-      <div style={styles.panel}>
-        <CardHead
-          title="Leads por região"
-          sub={`identificada pelo DDD do WhatsApp · ${regionData.reduce((s, d) => s + d.total, 0)} leads`}
-        />
-        {regionData.length === 0 ? <EmptyRow text="Nenhum telefone com DDD identificável ainda." /> : <GraficoRegiaoPizza regionData={regionData} />}
-      </div>
-
-      <div style={styles.panel}>
-        <div style={styles.panelHeader}>Origem dos leads</div>
+        <CardHead title="Origem dos leads" />
         {sourceData.length === 0 ? (
           <EmptyRow text="Nenhum contato com origem informada ainda." />
         ) : (
@@ -1523,9 +1500,40 @@ function Graficos({ contacts }) {
           </div>
         )}
       </div>
+
+      <div style={rowStyle}>
+        <div style={halfPanel}>
+          <CardHead title="Leads por região" sub={`identificada pelo DDD do WhatsApp · ${totalRegiao} leads`} />
+          {regionData.length === 0 ? <EmptyRow text="Nenhum telefone com DDD identificável ainda." /> : <GraficoRegiaoPizza regionData={regionData} />}
+        </div>
+
+        <div style={halfPanel}>
+          <CardHead title="Fechamento" sub={conversionRate !== null ? `${conversionRate.toFixed(0)}% de conversão` : undefined} />
+          {closedTotal === 0 ? (
+            <EmptyRow text="Ainda não há contatos fechados (ganhos ou perdidos)." />
+          ) : (
+            <div style={{ width: "100%", height: 160 }}>
+              <ResponsiveContainer>
+                <BarChart data={closingData} layout="vertical" margin={{ top: 8, right: 24, left: 8, bottom: 0 }}>
+                  <CartesianGrid stroke="#E7E8E3" horizontal={false} />
+                  <XAxis type="number" tick={{ fontSize: 11, fill: "#5B626B" }} allowDecimals={false} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fill: "#374151" }} width={70} />
+                  <Tooltip contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid #DFE1DC" }} />
+                  <Bar dataKey="qtd" radius={[0, 4, 4, 0]}>
+                    {closingData.map((entry, i) => (
+                      <Cell key={i} fill={entry.color} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
+
 
 /* ============================================================
    TAREFAS
