@@ -34,11 +34,6 @@ import {
   Tooltip,
   ResponsiveContainer,
   CartesianGrid,
-  PieChart,
-  Pie,
-  Legend,
-  AreaChart,
-  Area,
 } from "recharts";
 import { supabase } from "./supabaseClient";
 import { agruparPorRegiao } from "./ddd";
@@ -1123,34 +1118,297 @@ function Funil({ contacts, onEdit }) {
   );
 }
 
-/* ============================================================
-   GRÁFICOS
-   ============================================================ */
+// Paleta Hirsch: verde principal (mesmo tom do botão "Solicitar Diagnóstico" do site),
+// roxo de apoio (mesmo tom do gradiente/ilustração do site).
+const HIRSCH_GREEN = "#22C55E";
+const HIRSCH_GREEN_DARK = "#15803D";
+const HIRSCH_PURPLE = "#7C3AED";
 
-const REGION_COLORS = [
-  "#2a78d6", // azul
-  "#eb6834", // laranja
-  "#1baf7a", // verde-água
-  "#eda100", // amarelo
-  "#e87ba4", // magenta
-  "#4a3aa7", // violeta
-  "#e34948", // vermelho
-  "#008300", // verde
-  "#94A3B8", // cinza (não identificado)
-];
+// 6 passos, um por etapa do funil (novo lead -> ganho), do mais claro ao mais escuro
+const FUNNEL_COLORS = ["#86EFAC", "#4ADE80", "#22C55E", "#16A34A", "#15803D", "#14532D"];
+
+// Paleta categórica pro gráfico de região: verde e roxo da marca primeiro, depois cores de apoio
+const REGION_COLORS = ["#22C55E", "#7C3AED", "#0EA5E9", "#F59E0B", "#EC4899", "#14532D", "#4C1D95", "#0D9488", "#94A3B8"];
+
+function fmtBRLShort(v) {
+  const n = Number(v || 0);
+  if (n >= 1000) return "R$" + (n / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "k";
+  return fmtMoney(n);
+}
+
+// Tooltip simples reutilizado pelos 3 gráficos customizados
+function useTooltip() {
+  const [tip, setTip] = useState(null);
+  const mostrar = (e, texto) => setTip({ x: e.clientX, y: e.clientY, texto });
+  const mover = (e) => setTip((t) => (t ? { ...t, x: e.clientX, y: e.clientY } : t));
+  const esconder = () => setTip(null);
+  const elemento = tip ? (
+    <div
+      style={{
+        position: "fixed",
+        left: tip.x,
+        top: tip.y,
+        transform: "translate(-50%, -130%)",
+        pointerEvents: "none",
+        background: "#1C2127",
+        color: "#fff",
+        fontSize: 11.5,
+        fontWeight: 600,
+        padding: "6px 9px",
+        borderRadius: 6,
+        whiteSpace: "nowrap",
+        zIndex: 50,
+      }}
+    >
+      {tip.texto}
+    </div>
+  ) : null;
+  return { mostrar, mover, esconder, elemento };
+}
+
+/* ---------------- Funil (barras que diminuem) ---------------- */
+function GraficoFunil({ funnelData, conversaoFunilPct, perdidos, ticketMedio }) {
+  const { mostrar, mover, esconder, elemento } = useTooltip();
+  const funnelMax = funnelData[0]?.total || 1;
+
+  return (
+    <>
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        {funnelData.map((etapa, i) => {
+          const larguraPct = 30 + 70 * (etapa.total / funnelMax);
+          const anterior = funnelData[i - 1];
+          return (
+            <div key={etapa.id}>
+              {i > 0 && anterior && (
+                <div style={{ textAlign: "center", fontSize: 11, color: "#9AA0A6", padding: "5px 0" }}>
+                  ↓ {anterior.total > 0 ? Math.round((etapa.total / anterior.total) * 100) : 0}% avançam ·{" "}
+                  {anterior.total > 0 ? Math.round((1 - etapa.total / anterior.total) * 100) : 0}% saem nesta etapa
+                </div>
+              )}
+              <div style={{ display: "flex", justifyContent: "center" }}>
+                <div
+                  onMouseEnter={(e) => mostrar(e, `${etapa.label} · ${etapa.total}`)}
+                  onMouseMove={mover}
+                  onMouseLeave={esconder}
+                  style={{
+                    width: `${larguraPct}%`,
+                    height: 46,
+                    borderRadius: 4,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    background: FUNNEL_COLORS[i],
+                    color: "#fff",
+                    fontSize: 12.5,
+                    fontWeight: 650,
+                    cursor: "pointer",
+                  }}
+                >
+                  <span style={{ opacity: 0.92 }}>{etapa.label}</span>
+                  <span>{etapa.total}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", gap: 24, marginTop: 16, paddingTop: 12, borderTop: "1px solid #DFE1DC" }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 16, color: "#1C2127" }}>{conversaoFunilPct}%</div>
+          <div style={{ fontSize: 11, color: "#9AA0A6" }}>conversão lead → ganho</div>
+        </div>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 16, color: "#1C2127" }}>{perdidos}</div>
+          <div style={{ fontSize: 11, color: "#9AA0A6" }}>perdidos no período</div>
+        </div>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 16, color: "#1C2127" }}>{fmtMoney(ticketMedio)}</div>
+          <div style={{ fontSize: 11, color: "#9AA0A6" }}>ticket médio fechado</div>
+        </div>
+      </div>
+      {elemento}
+    </>
+  );
+}
+
+/* ---------------- Eixos compartilhados (linha + coluna) ---------------- */
+function Eixos({ w, h, padL, padR, padT, padB, maxVal, formatarTick }) {
+  const plotW = w - padL - padR;
+  const plotH = h - padT - padB;
+  const passos = 4;
+  const linhas = [];
+  for (let i = 0; i <= passos; i++) {
+    const y = padT + plotH - (plotH * i) / passos;
+    const val = (maxVal * i) / passos;
+    linhas.push(<line key={"g" + i} x1={padL} x2={w - padR} y1={y} y2={y} stroke={i === 0 ? "#C3C2B7" : "#E7E8E3"} strokeWidth={1} />);
+    linhas.push(
+      <text key={"l" + i} x={padL - 8} y={y + 3.5} textAnchor="end" fontSize={10.5} fill="#9AA0A6">
+        {formatarTick(val)}
+      </text>
+    );
+  }
+  return <>{linhas}</>;
+}
+
+/* ---------------- Valor fechado por mês (linha + área) ---------------- */
+function GraficoValorMensal({ dados }) {
+  const { mostrar, mover, esconder, elemento } = useTooltip();
+  const w = 760, h = 220, padL = 56, padR = 16, padT = 14, padB = 34;
+  const maxVal = Math.max(1000, ...dados.map((d) => d.valor)) * 1.15;
+  const plotW = w - padL - padR;
+  const plotH = h - padT - padB;
+  const n = dados.length || 1;
+  const stepX = plotW / Math.max(1, n - 1);
+  const xAt = (i) => padL + stepX * i;
+  const yAt = (v) => padT + plotH - (plotH * v) / maxVal;
+  const pontos = dados.map((d, i) => `${xAt(i)},${yAt(d.valor)}`).join(" L ");
+
+  return (
+    <div style={{ width: "100%", overflowX: "auto" }}>
+      <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", minWidth: 480, overflow: "visible" }}>
+        <Eixos w={w} h={h} padL={padL} padR={padR} padT={padT} padB={padB} maxVal={maxVal} formatarTick={(v) => "R$" + Math.round(v / 1000) + "k"} />
+        <path d={`M ${xAt(0)},${padT + plotH} L ${pontos} L ${xAt(n - 1)},${padT + plotH} Z`} fill={HIRSCH_GREEN} opacity={0.12} />
+        <path d={`M ${pontos}`} fill="none" stroke={HIRSCH_GREEN} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+        {dados.map((d, i) => {
+          const cx = xAt(i), cy = yAt(d.valor);
+          return (
+            <g key={d.mes}>
+              <circle
+                cx={cx} cy={cy} r={4.5} fill={HIRSCH_GREEN} stroke="#fff" strokeWidth={2}
+                style={{ cursor: "pointer" }}
+                onMouseEnter={(e) => mostrar(e, `${d.mes} · ${fmtMoney(d.valor)}`)}
+                onMouseMove={mover}
+                onMouseLeave={esconder}
+              />
+              <text x={cx} y={h - 12} textAnchor="middle" fontSize={10.5} fill="#9AA0A6" transform={`rotate(-30 ${cx} ${h - 12})`}>
+                {d.mes}
+              </text>
+              {i === n - 1 && (
+                <text x={cx} y={cy - 12} textAnchor="end" fontSize={10.5} fontWeight={600} fill="#374151">
+                  {fmtBRLShort(d.valor)}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      {elemento}
+    </div>
+  );
+}
+
+/* ---------------- Negociações abertas por mês (colunas) ---------------- */
+function GraficoNegociacoesMensal({ dados }) {
+  const { mostrar, mover, esconder, elemento } = useTooltip();
+  const w = 760, h = 220, padL = 30, padR = 16, padT = 14, padB = 34;
+  const maxVal = Math.max(4, ...dados.map((d) => d.qtd)) * 1.15;
+  const plotW = w - padL - padR;
+  const plotH = h - padT - padB;
+  const n = dados.length || 1;
+  const slot = plotW / n;
+  const barW = Math.min(24, slot * 0.55);
+
+  return (
+    <div style={{ width: "100%", overflowX: "auto" }}>
+      <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", minWidth: 480, overflow: "visible" }}>
+        <Eixos w={w} h={h} padL={padL} padR={padR} padT={padT} padB={padB} maxVal={maxVal} formatarTick={(v) => String(Math.round(v))} />
+        {dados.map((d, i) => {
+          const cx = padL + slot * i + slot / 2;
+          const barH = (plotH * d.qtd) / maxVal;
+          const y = padT + plotH - barH;
+          return (
+            <g key={d.mes}>
+              <rect
+                x={cx - barW / 2} y={y} width={barW} height={Math.max(barH, 1)} rx={4}
+                fill={HIRSCH_GREEN}
+                style={{ cursor: "pointer" }}
+                onMouseEnter={(e) => mostrar(e, `${d.mes} · ${d.qtd} negociações`)}
+                onMouseMove={mover}
+                onMouseLeave={esconder}
+              />
+              <text x={cx} y={h - 12} textAnchor="middle" fontSize={10.5} fill="#9AA0A6" transform={`rotate(-30 ${cx} ${h - 12})`}>
+                {d.mes}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      {elemento}
+    </div>
+  );
+}
+
+/* ---------------- Leads por região (rosca) ---------------- */
+function GraficoRegiaoPizza({ regionData }) {
+  const { mostrar, mover, esconder, elemento } = useTooltip();
+  const total = regionData.reduce((s, d) => s + d.total, 0);
+  const size = 220, r = 80, cx = size / 2, cy = size / 2, strokeW = 34;
+  const circumference = 2 * Math.PI * r;
+
+  let cumulative = 0;
+  const segments = regionData.map((d, i) => {
+    const frac = total > 0 ? d.total / total : 0;
+    const rawLen = frac * circumference;
+    const segLen = Math.max(rawLen - (regionData.length > 1 ? 2 : 0), 0);
+    const seg = { ...d, color: REGION_COLORS[i % REGION_COLORS.length], dasharray: `${segLen} ${circumference - segLen}`, dashoffset: -cumulative };
+    cumulative += rawLen;
+    return seg;
+  });
+
+  return (
+    <div style={{ display: "flex", gap: 28, alignItems: "center", flexWrap: "wrap" }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink: 0 }}>
+        <g transform={`rotate(-90 ${cx} ${cy})`}>
+          {segments.map((s, i) => (
+            <circle
+              key={i} cx={cx} cy={cy} r={r} fill="none" stroke={s.color} strokeWidth={strokeW}
+              strokeDasharray={s.dasharray} strokeDashoffset={s.dashoffset}
+              style={{ cursor: "pointer" }}
+              onMouseEnter={(e) => mostrar(e, `${s.nome} · ${s.faixaDDD} · ${s.total} leads`)}
+              onMouseMove={mover}
+              onMouseLeave={esconder}
+            />
+          ))}
+        </g>
+        <text x={cx} y={cy - 4} textAnchor="middle" fontSize={22} fontWeight={700} fill="#1C2127">
+          {total}
+        </text>
+        <text x={cx} y={cy + 15} textAnchor="middle" fontSize={11} fill="#9AA0A6">
+          leads
+        </text>
+      </svg>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 180, flex: 1 }}>
+        {regionData.map((d, i) => (
+          <div key={d.nome} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: REGION_COLORS[i % REGION_COLORS.length], flexShrink: 0 }} />
+            <span style={{ flex: 1, color: "#374151" }}>{d.nome}</span>
+            <span style={{ fontWeight: 600, color: "#1C2127" }}>{d.total}</span>
+            <span style={{ color: "#9AA0A6", width: 38, textAlign: "right" }}>{total > 0 ? Math.round((d.total / total) * 100) : 0}%</span>
+          </div>
+        ))}
+      </div>
+      {elemento}
+    </div>
+  );
+}
+
+/* ============================================================
+   GRÁFICOS (aba principal)
+   ============================================================ */
 
 function Graficos({ contacts }) {
   const months = lastMonthKeys(12);
 
   const revenueData = months.map((key) => ({
-    name: monthLabel(key),
+    mes: monthLabel(key),
     valor: contacts
       .filter((c) => c.stage === "ganho" && monthKey(c.created_at) === key)
       .reduce((s, c) => s + Number(c.value || 0), 0),
   }));
 
   const dealsPerMonthData = months.map((key) => ({
-    name: monthLabel(key),
+    mes: monthLabel(key),
     qtd: contacts.filter((c) => monthKey(c.created_at) === key).length,
   }));
 
@@ -1159,7 +1417,7 @@ function Graficos({ contacts }) {
   const closedTotal = won.length + lost.length;
   const conversionRate = closedTotal === 0 ? null : (won.length / closedTotal) * 100;
   const closingData = [
-    { name: "Ganho", qtd: won.length, color: "#15803D" },
+    { name: "Ganho", qtd: won.length, color: HIRSCH_GREEN_DARK },
     { name: "Perdido", qtd: lost.length, color: "#DC2626" },
   ];
   const ticketMedio = won.length > 0 ? won.reduce((s, c) => s + Number(c.value || 0), 0) / won.length : 0;
@@ -1171,17 +1429,14 @@ function Graficos({ contacts }) {
 
   const regionData = agruparPorRegiao(contacts.map((c) => c.phone));
 
-  // Funil: todas as etapas exceto "perdido" (perda não é um degrau do funil, é uma saída)
   const funnelStages = STAGES.filter((s) => s.id !== "perdido");
   const funnelData = funnelStages.map((s) => ({
     id: s.id,
     label: s.label,
-    color: s.color,
     total: contacts.filter((c) => c.stage === s.id).length,
   }));
   const funnelMax = funnelData[0]?.total || 1;
-  const conversaoFunilPct =
-    funnelMax > 0 ? Math.round((funnelData[funnelData.length - 1].total / funnelMax) * 100) : 0;
+  const conversaoFunilPct = funnelMax > 0 ? Math.round((funnelData[funnelData.length - 1].total / funnelMax) * 100) : 0;
 
   return (
     <div>
@@ -1193,97 +1448,18 @@ function Graficos({ contacts }) {
         {funnelMax === 0 ? (
           <EmptyRow text="Ainda não há contatos no funil." />
         ) : (
-          <>
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              {funnelData.map((etapa, i) => {
-                const larguraPct = 30 + 70 * (etapa.total / funnelMax);
-                const anterior = funnelData[i - 1];
-                return (
-                  <div key={etapa.id}>
-                    {i > 0 && anterior && (
-                      <div style={{ textAlign: "center", fontSize: 11, color: "#9AA0A6", padding: "4px 0" }}>
-                        ↓ {anterior.total > 0 ? Math.round((etapa.total / anterior.total) * 100) : 0}% avançam
-                      </div>
-                    )}
-                    <div style={{ display: "flex", justifyContent: "center" }}>
-                      <div
-                        style={{
-                          width: `${larguraPct}%`,
-                          height: 40,
-                          borderRadius: 4,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          gap: 8,
-                          background: etapa.color,
-                          color: "#fff",
-                          fontSize: 12,
-                          fontWeight: 600,
-                        }}
-                      >
-                        <span>{etapa.label}</span>
-                        <span>{etapa.total}</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{ display: "flex", gap: 24, marginTop: 16, paddingTop: 12, borderTop: "1px solid #DFE1DC" }}>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 16, color: "#1C2127" }}>{conversaoFunilPct}%</div>
-                <div style={{ fontSize: 11, color: "#9AA0A6" }}>conversão lead → ganho</div>
-              </div>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 16, color: "#1C2127" }}>{lost.length}</div>
-                <div style={{ fontSize: 11, color: "#9AA0A6" }}>perdidos no período</div>
-              </div>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 16, color: "#1C2127" }}>{fmtMoney(ticketMedio)}</div>
-                <div style={{ fontSize: 11, color: "#9AA0A6" }}>ticket médio fechado</div>
-              </div>
-            </div>
-          </>
+          <GraficoFunil funnelData={funnelData} conversaoFunilPct={conversaoFunilPct} perdidos={lost.length} ticketMedio={ticketMedio} />
         )}
       </div>
 
       <div style={styles.panel}>
         <div style={styles.panelHeader}>Valor fechado por mês</div>
-        <div style={{ width: "100%", height: 220 }}>
-          <ResponsiveContainer>
-            <AreaChart data={revenueData} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
-              <CartesianGrid stroke="#E7E8E3" vertical={false} />
-              <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#5B626B" }} interval={0} angle={-30} textAnchor="end" height={50} />
-              <YAxis tick={{ fontSize: 11, fill: "#5B626B" }} tickFormatter={(v) => `R$${v >= 1000 ? `${Math.round(v / 1000)}k` : v}`} />
-              <Tooltip formatter={(v) => fmtMoney(v)} contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid #DFE1DC" }} />
-              <Area
-                type="monotone"
-                dataKey="valor"
-                stroke="#22C55E"
-                strokeWidth={2}
-                fill="#22C55E"
-                fillOpacity={0.12}
-                dot={{ r: 3, fill: "#22C55E", strokeWidth: 0 }}
-                activeDot={{ r: 5 }}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
+        <GraficoValorMensal dados={revenueData} />
       </div>
 
       <div style={styles.panel}>
         <div style={styles.panelHeader}>Negociações abertas por mês</div>
-        <div style={{ width: "100%", height: 220 }}>
-          <ResponsiveContainer>
-            <BarChart data={dealsPerMonthData} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
-              <CartesianGrid stroke="#E7E8E3" vertical={false} />
-              <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#5B626B" }} interval={0} angle={-30} textAnchor="end" height={50} />
-              <YAxis tick={{ fontSize: 11, fill: "#5B626B" }} allowDecimals={false} />
-              <Tooltip contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid #DFE1DC" }} />
-              <Bar dataKey="qtd" radius={[3, 3, 0, 0]} fill="#38BDF8" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        <GraficoNegociacoesMensal dados={dealsPerMonthData} />
       </div>
 
       <div style={styles.panel}>
@@ -1313,37 +1489,7 @@ function Graficos({ contacts }) {
 
       <div style={styles.panel}>
         <div style={styles.panelHeader}>Leads por região</div>
-        {regionData.length === 0 ? (
-          <EmptyRow text="Nenhum telefone com DDD identificável ainda." />
-        ) : (
-          <div style={{ width: "100%", height: 280 }}>
-            <ResponsiveContainer>
-              <PieChart>
-                <Pie
-                  data={regionData}
-                  dataKey="total"
-                  nameKey="nome"
-                  cx="38%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={85}
-                  paddingAngle={2}
-                  label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
-                  labelLine={false}
-                >
-                  {regionData.map((entry, i) => (
-                    <Cell key={i} fill={REGION_COLORS[i % REGION_COLORS.length]} />
-                  ))}
-                </Pie>
-                <Legend layout="vertical" align="right" verticalAlign="middle" wrapperStyle={{ fontSize: 12 }} />
-                <Tooltip
-                  formatter={(value, _name, props) => [`${value} leads`, props.payload.nome]}
-                  contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid #DFE1DC" }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        )}
+        {regionData.length === 0 ? <EmptyRow text="Nenhum telefone com DDD identificável ainda." /> : <GraficoRegiaoPizza regionData={regionData} />}
       </div>
 
       <div style={styles.panel}>
@@ -1358,7 +1504,7 @@ function Graficos({ contacts }) {
                 <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#5B626B" }} interval={0} angle={-12} textAnchor="end" height={50} />
                 <YAxis tick={{ fontSize: 11, fill: "#5B626B" }} allowDecimals={false} />
                 <Tooltip contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid #DFE1DC" }} />
-                <Bar dataKey="qtd" radius={[3, 3, 0, 0]} fill="#60A5FA" />
+                <Bar dataKey="qtd" radius={[3, 3, 0, 0]} fill={HIRSCH_GREEN} />
               </BarChart>
             </ResponsiveContainer>
           </div>
