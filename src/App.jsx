@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useId, useRef } from "react";
 import {
   LayoutGrid,
   Users,
@@ -26,6 +26,8 @@ import {
   Receipt,
 } from "lucide-react";
 import {
+  AreaChart,
+  Area,
   BarChart,
   Bar,
   Cell,
@@ -37,16 +39,17 @@ import {
 } from "recharts";
 import { supabase } from "./supabaseClient";
 import { agruparPorRegiao } from "./ddd";
+import { conversionRate as getConversionRate, localDate, shortMoney, validateContact, duplicateContact } from "./crm";
 
 /* ============================================================
    COBRANÇA (ainda não ativada)
    Quando decidir o preço, crie um Payment Link no Stripe
    (dashboard.stripe.com > Payment Links) e cole a URL abaixo.
-   Enquanto ficar como está ("#"), o botão "Assinar agora" não
+   Configure VITE_STRIPE_PAYMENT_LINK para habilitar "Assinar agora". Sem URL, não
    faz nada de verdade — é só um placeholder visual.
    ============================================================ */
-const STRIPE_PAYMENT_LINK = "#";
-const TRIAL_DAYS = 7;
+const STRIPE_PAYMENT_LINK = import.meta.env.VITE_STRIPE_PAYMENT_LINK || "";
+const PAYMENTS_ENABLED = STRIPE_PAYMENT_LINK.startsWith("https://");
 
 function daysLeft(trialEndsAt) {
   if (!trialEndsAt) return null;
@@ -78,11 +81,10 @@ const LEAD_SOURCES = [
   { id: "outro", label: "Outro" },
 ];
 
-const leadSourceLabel = (id) => (LEAD_SOURCES.find((s) => s.id === id) || LEAD_SOURCES[0]).label;
 
 function monthKey(dateStr) {
   if (!dateStr) return null;
-  return dateStr.slice(0, 7); // "YYYY-MM"
+  return localDate(dateStr).slice(0, 7); // "YYYY-MM"
 }
 
 function monthLabel(key) {
@@ -107,13 +109,13 @@ function fmtMoney(v) {
 
 function fmtDate(d) {
   if (!d) return "";
-  const datePart = d.slice(0, 10);
-  const [y, m, day] = datePart.split("-");
+  const datePart = localDate(d);
+  const [, m, day] = datePart.split("-");
   return `${day}/${m}`;
 }
 
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  return localDate();
 }
 
 function withinDays(dateStr, days) {
@@ -122,13 +124,6 @@ function withinDays(dateStr, days) {
   const now = new Date();
   const diff = now - d;
   return diff >= 0 && diff <= days * 24 * 3600 * 1000;
-}
-
-function isSameMonth(dateStr) {
-  if (!dateStr) return false;
-  const d = new Date(dateStr);
-  const now = new Date();
-  return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
 }
 
 const DATE_RANGE_OPTIONS = [
@@ -142,12 +137,12 @@ const DATE_RANGE_OPTIONS = [
 function inDateRange(dateStr, mode, from, to) {
   if (!dateStr) return false;
   if (mode === "all") return true;
-  if (mode === "today") return dateStr.slice(0, 10) === todayISO();
+  if (mode === "today") return localDate(dateStr) === todayISO();
   if (mode === "7d") return withinDays(dateStr, 7);
   if (mode === "30d") return withinDays(dateStr, 30);
-  if (mode === "month") return isSameMonth(dateStr);
+  if (mode === "month") return localDate(dateStr).slice(0, 7) === todayISO().slice(0, 7);
   if (mode === "custom") {
-    const d = dateStr.slice(0, 10);
+    const d = localDate(dateStr);
     if (from && d < from) return false;
     if (to && d > to) return false;
     return true;
@@ -191,6 +186,7 @@ export default function EloCRM() {
   const [contacts, setContacts] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [tab, setTab] = useState("painel");
+  const [dataError, setDataError] = useState("");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null));
@@ -228,10 +224,15 @@ export default function EloCRM() {
 
   const loadData = useCallback(async () => {
     if (!profile) return;
-    const [{ data: c }, { data: t }] = await Promise.all([
-      supabase.from("contacts").select("*").order("created_at", { ascending: false }),
-      supabase.from("tasks").select("*").order("due_date", { ascending: true }),
+    const [{ data: c, error: contactError }, { data: t, error: taskError }] = await Promise.all([
+      supabase.from("contacts").select("*").eq("organization_id", profile.organization_id).order("created_at", { ascending: false }),
+      supabase.from("tasks").select("*").eq("organization_id", profile.organization_id).order("due_date", { ascending: true }),
     ]);
+    if (contactError || taskError) {
+      setDataError("Não foi possível atualizar os dados. Tente novamente.");
+      return;
+    }
+    setDataError("");
     setContacts(c || []);
     setTasks(t || []);
   }, [profile]);
@@ -259,12 +260,14 @@ export default function EloCRM() {
   }, [profile, loadData]);
 
   const addContact = async (contact) => {
+    const message = validateContact(contact);
+    if (message) return { message };
     const { error } = await supabase.from("contacts").insert({
       organization_id: profile.organization_id,
       created_by: profile.id,
-      name: contact.name,
+      name: contact.name.trim(),
       company: contact.company,
-      email: contact.email,
+      email: contact.email?.trim() || "",
       phone: contact.phone,
       value: Number(contact.value) || 0,
       stage: contact.stage,
@@ -281,7 +284,12 @@ export default function EloCRM() {
 
   const editContact = async (id, patch) => {
     const previous = contacts.find((c) => c.id === id);
-    const { error } = await supabase.from("contacts").update(patch).eq("id", id);
+    if ("name" in patch) {
+      const message = validateContact(patch);
+      if (message) return { message };
+      patch = { ...patch, name: patch.name.trim(), email: patch.email?.trim() || "", value: Number(patch.value || 0) };
+    }
+    const { error } = await supabase.from("contacts").update(patch).eq("id", id).eq("organization_id", profile.organization_id);
     if (error) return error;
     if (patch.stage && previous && patch.stage !== previous.stage) {
       await supabase.from("deal_stage_history").insert({
@@ -297,29 +305,34 @@ export default function EloCRM() {
   };
 
   const removeContact = async (id) => {
-    await supabase.from("contacts").delete().eq("id", id);
-    loadData();
+    const { error } = await supabase.from("contacts").delete().eq("id", id).eq("organization_id", profile.organization_id);
+    if (error) { setDataError("Não foi possível excluir o contato."); return; }
+    await loadData();
   };
 
   const addTask = async (task) => {
-    await supabase.from("tasks").insert({
+    const { error } = await supabase.from("tasks").insert({
       organization_id: profile.organization_id,
       created_by: profile.id,
       contact_id: task.contact_id || null,
-      title: task.title,
+      title: task.title.trim(),
       due_date: task.due_date || null,
     });
-    loadData();
+    if (error) return error;
+    await loadData();
+    return null;
   };
 
   const toggleTask = async (id, done) => {
-    await supabase.from("tasks").update({ done: !done }).eq("id", id);
-    loadData();
+    const { error } = await supabase.from("tasks").update({ done: !done }).eq("id", id).eq("organization_id", profile.organization_id);
+    if (error) { setDataError("Não foi possível atualizar a tarefa."); return; }
+    await loadData();
   };
 
   const removeTask = async (id) => {
-    await supabase.from("tasks").delete().eq("id", id);
-    loadData();
+    const { error } = await supabase.from("tasks").delete().eq("id", id).eq("organization_id", profile.organization_id);
+    if (error) { setDataError("Não foi possível excluir a tarefa."); return; }
+    await loadData();
   };
 
   if (session === undefined) return <LoadingScreen text="Carregando…" />;
@@ -338,7 +351,8 @@ export default function EloCRM() {
     <div style={styles.app}>
       <style>{globalCss}</style>
       <Sidebar tab={tab} setTab={setTab} />
-      <div style={styles.main}>
+      <main style={styles.main}>
+        {dataError && <div role="alert" style={styles.authError}>{dataError} <button style={styles.secondaryBtn} onClick={loadData}>Tentar novamente</button></div>}
         {!isActive && remaining !== null && <TrialBanner daysLeft={remaining} />}
         {tab === "painel" && <Painel contacts={contacts} tasks={tasks} />}
         {tab === "contatos" && (
@@ -351,11 +365,16 @@ export default function EloCRM() {
         )}
         {tab === "dados" && <Dados profile={profile} org={org} email={session?.user?.email} />}
         {tab === "ajuda" && <Ajuda />}
-        {tab === "planos" && <Planos org={org} remaining={remaining} isActive={isActive} />}
+        {tab === "planos" && <Planos remaining={remaining} isActive={isActive} />}
         {tab === "pagamentos" && <Pagamentos org={org} isActive={isActive} />}
-      </div>
+      </main>
     </div>
   );
+}
+
+function SubscribeButton({ style }) {
+  return PAYMENTS_ENABLED ? <a href={STRIPE_PAYMENT_LINK} style={style}>Assinar agora</a>
+    : <span style={{ fontSize: 13, color: "#596579" }}>Assinaturas ainda não disponíveis. Fale com a equipe Hirsch.</span>;
 }
 
 function TrialBanner({ daysLeft }) {
@@ -366,9 +385,7 @@ function TrialBanner({ daysLeft }) {
           ? `Seu período de teste termina em ${daysLeft} dia${daysLeft === 1 ? "" : "s"}.`
           : "Seu período de teste termina hoje."}
       </span>
-      <a href={STRIPE_PAYMENT_LINK} style={styles.trialBannerLink}>
-        Assinar agora
-      </a>
+      <SubscribeButton style={styles.trialBannerLink} />
     </div>
   );
 }
@@ -383,15 +400,9 @@ function Paywall() {
           <span style={{ color: "#1C2127" }}>Elo</span>
         </div>
         <p style={{ fontSize: 13.5, color: "#5B626B", lineHeight: 1.5, marginBottom: 18 }}>
-          Seu período de teste grátis acabou. Assine para continuar usando o Elo e manter acesso aos seus
-          contatos, funil e tarefas.
+          {PAYMENTS_ENABLED ? "Seu período de teste grátis acabou. Assine para continuar usando o Elo." : "Seu período de teste grátis acabou. As assinaturas ainda não estão disponíveis; fale com a equipe Hirsch para continuar."}
         </p>
-        <a
-          href={STRIPE_PAYMENT_LINK}
-          style={{ ...styles.primaryBtn, width: "100%", justifyContent: "center", textDecoration: "none" }}
-        >
-          Assinar agora
-        </a>
+        <SubscribeButton style={{ ...styles.primaryBtn, width: "100%", justifyContent: "center", textDecoration: "none" }} />
         <button
           style={{ ...styles.secondaryBtn, width: "100%", justifyContent: "center", marginTop: 10 }}
           onClick={() => supabase.auth.signOut()}
@@ -427,6 +438,7 @@ function AuthScreen() {
   const [loading, setLoading] = useState(false);
 
   const submit = async () => {
+    if (loading) return;
     setError("");
     setInfo("");
     setLoading(true);
@@ -552,7 +564,7 @@ function Sidebar({ tab, setTab }) {
           const Icon = it.icon;
           const active = tab === it.id;
           return (
-            <button key={it.id} onClick={() => setTab(it.id)} style={{ ...styles.navBtn, ...(active ? styles.navBtnActive : {}) }}>
+            <button key={it.id} aria-label={it.label} aria-current={active ? "page" : undefined} onClick={() => setTab(it.id)} style={{ ...styles.navBtn, ...(active ? styles.navBtnActive : {}) }}>
               <Icon size={17} strokeWidth={2} />
               <span className="elo-nav-label">{it.label}</span>
             </button>
@@ -584,12 +596,13 @@ function Sidebar({ tab, setTab }) {
         )}
         <button
           style={{ ...styles.navBtn, ...(settingsActive ? styles.navBtnActive : {}) }}
+          aria-label="Configurações" aria-expanded={settingsOpen}
           onClick={() => setSettingsOpen((v) => !v)}
         >
           <Settings size={17} strokeWidth={2} />
           <span className="elo-nav-label">Configurações</span>
         </button>
-        <button style={styles.logoutBtn} onClick={() => supabase.auth.signOut()}>
+        <button aria-label="Sair" style={styles.logoutBtn} onClick={() => supabase.auth.signOut()}>
           <LogOut size={15} />
           <span className="elo-nav-label">Sair</span>
         </button>
@@ -611,12 +624,10 @@ function Painel({ contacts, tasks }) {
 
   const open = scoped.filter((c) => c.stage !== "ganho" && c.stage !== "perdido");
   const won = scoped.filter((c) => c.stage === "ganho");
-  const lost = scoped.filter((c) => c.stage === "perdido");
   const pendingTasks = tasks.filter((t) => !t.done);
   const pipelineValue = open.reduce((s, c) => s + Number(c.value || 0), 0);
   const wonValue = won.reduce((s, c) => s + Number(c.value || 0), 0);
-  const closedTotal = won.length + lost.length;
-  const conversionRate = closedTotal === 0 ? null : (won.length / closedTotal) * 100;
+  const conversionRate = getConversionRate(scoped);
 
   const dueReminders = scoped
     .filter((c) => c.next_reminder_date && reminderState(c.next_reminder_date) !== "futuro")
@@ -647,14 +658,14 @@ function Painel({ contacts, tasks }) {
 
       <div style={styles.cardsRow}>
         <MetricCard label="Contatos no período" value={scoped.length} />
-        <MetricCard label="Em negociação" value={fmtMoney(pipelineValue)} />
+        <MetricCard label="Valor em aberto" value={fmtMoney(pipelineValue)} />
         <MetricCard label="Fechado (ganho)" value={fmtMoney(wonValue)} accent="#3C8558" />
         <MetricCard
-          label="Taxa de conversão"
+          label="Ganhos entre encerrados"
           value={conversionRate === null ? "—" : `${conversionRate.toFixed(0)}%`}
           accent="#2F6F63"
         />
-        <MetricCard label="Tarefas pendentes" value={pendingTasks.length} />
+        <MetricCard label="Tarefas pendentes (total)" value={pendingTasks.length} />
       </div>
 
       <div style={styles.panel}>
@@ -664,7 +675,7 @@ function Painel({ contacts, tasks }) {
             <BarChart data={chartData} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
               <CartesianGrid stroke="#E7E8E3" vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#5B626B" }} interval={0} angle={-12} textAnchor="end" height={50} />
-              <YAxis tick={{ fontSize: 11, fill: "#5B626B" }} tickFormatter={(v) => `R$${v >= 1000 ? `${Math.round(v / 1000)}k` : v}`} />
+              <YAxis tick={{ fontSize: 11, fill: "#5B626B" }} tickFormatter={shortMoney} />
               <Tooltip formatter={(v) => fmtMoney(v)} contentStyle={{ fontSize: 12, borderRadius: 6, border: "1px solid #DFE1DC" }} />
               <Bar dataKey="valor" radius={[3, 3, 0, 0]}>
                 {chartData.map((entry, i) => (
@@ -810,10 +821,11 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
   const [showForm, setShowForm] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [duplicateConfirmed, setDuplicateConfirmed] = useState(false);
 
   const filtered = contacts.filter((c) => {
     const q = query.toLowerCase();
-    const matchesQuery = c.name.toLowerCase().includes(q) || (c.company || "").toLowerCase().includes(q);
+    const matchesQuery = [c.name, c.company, c.email, c.phone].some((value) => String(value || "").toLowerCase().includes(q));
     if (!matchesQuery) return false;
 
     if (!inDateRange(c.created_at, dateMode, customFrom, customTo)) return false;
@@ -841,21 +853,29 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
     });
     setShowForm(true);
     setSaveError("");
+    setDuplicateConfirmed(false);
   };
 
   const openEdit = (c) => {
-    setEditing({ ...c });
+    setEditing({ ...c, name: c.name || "", company: c.company || "", email: c.email || "", phone: c.phone || "", notes: c.notes || "", value: c.value ?? "" });
     setShowForm(true);
     setSaveError("");
+    setDuplicateConfirmed(false);
   };
 
   const save = async () => {
-    if (!editing.name.trim()) return;
+    if (saving) return;
+    const validationError = validateContact(editing);
+    if (validationError) { setSaveError(validationError); return; }
+    if (duplicateContact(editing, contacts) && !duplicateConfirmed) {
+      setSaveError("Já existe um contato com esse e-mail ou telefone. Confirme abaixo para salvar mesmo assim.");
+      return;
+    }
     setSaving(true);
     setSaveError("");
     let error = null;
     if (editing.id) {
-      const { id, created_at, organization_id, created_by, ...patch } = editing;
+      const { id, created_at: _created_at, organization_id: _organization_id, created_by: _created_by, ...patch } = editing;
       error = await onEdit(id, patch);
     } else {
       error = await onAdd(editing);
@@ -884,7 +904,7 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
       <div style={styles.filterRow}>
         <div style={styles.searchBar}>
           <Search size={15} color="#9AA0A6" />
-          <input placeholder="Buscar por nome ou empresa…" value={query} onChange={(e) => setQuery(e.target.value)} style={styles.searchInput} />
+          <input aria-label="Buscar contatos" placeholder="Nome, empresa, e-mail ou telefone…" value={query} onChange={(e) => setQuery(e.target.value)} style={styles.searchInput} />
         </div>
         <DateRangePicker
           mode={dateMode}
@@ -943,10 +963,10 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
                 <span style={{ ...styles.badge, color: stageInfo(c.stage).color, borderColor: stageInfo(c.stage).color }}>
                   {stageInfo(c.stage).label}
                 </span>
-                <button style={styles.iconBtn} onClick={() => openEdit(c)}>
+                <button aria-label={`Editar ${c.name}`} style={styles.iconBtn} onClick={() => openEdit(c)}>
                   <Pencil size={14} />
                 </button>
-                <button style={styles.iconBtn} onClick={() => onRemove(c.id)}>
+                <button aria-label={`Excluir ${c.name}`} style={styles.iconBtn} onClick={() => { if (window.confirm(`Excluir o contato ${c.name}?`)) onRemove(c.id); }}>
                   <Trash2 size={14} />
                 </button>
               </div>
@@ -965,15 +985,15 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
           </Field>
           <div style={styles.fieldRow}>
             <Field label="E-mail">
-              <input style={styles.input} value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} />
+              <input type="email" style={styles.input} value={editing.email} onChange={(e) => { setEditing({ ...editing, email: e.target.value }); setDuplicateConfirmed(false); }} />
             </Field>
             <Field label="Telefone">
-              <input style={styles.input} value={editing.phone} onChange={(e) => setEditing({ ...editing, phone: e.target.value })} />
+              <input type="tel" style={styles.input} value={editing.phone} onChange={(e) => { setEditing({ ...editing, phone: e.target.value }); setDuplicateConfirmed(false); }} />
             </Field>
           </div>
           <div style={styles.fieldRow}>
             <Field label="Valor estimado (R$)">
-              <input style={styles.input} type="number" value={editing.value} onChange={(e) => setEditing({ ...editing, value: e.target.value })} />
+              <input style={styles.input} type="number" min="0" step="0.01" value={editing.value} onChange={(e) => setEditing({ ...editing, value: e.target.value })} />
             </Field>
             <Field label="Etapa">
               <select style={styles.input} value={editing.stage} onChange={(e) => setEditing({ ...editing, stage: e.target.value })}>
@@ -1039,7 +1059,11 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
           <Field label="Notas">
             <textarea style={{ ...styles.input, minHeight: 70, resize: "vertical" }} value={editing.notes} onChange={(e) => setEditing({ ...editing, notes: e.target.value })} />
           </Field>
-          {saveError && <div style={styles.authError}>{saveError}</div>}
+          {editing && duplicateContact(editing, contacts) && <label style={{ display: "flex", gap: 8, fontSize: 13, marginBottom: 12 }}>
+            <input type="checkbox" checked={duplicateConfirmed} onChange={(e) => setDuplicateConfirmed(e.target.checked)} />
+            Já existe um contato com esse e-mail ou telefone. Quero salvar outro registro.
+          </label>}
+          {saveError && <div role="alert" style={styles.authError}>{saveError}</div>}
           <div style={styles.modalFoot}>
             <button style={styles.secondaryBtn} onClick={() => setShowForm(false)}>
               Cancelar
@@ -1060,12 +1084,17 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
 
 function Funil({ contacts, onEdit }) {
   const [dragId, setDragId] = useState(null);
-  const moveStage = (id, stage) => onEdit(id, { stage });
+  const [moveError, setMoveError] = useState("");
+  const moveStage = async (id, stage) => {
+    const error = await onEdit(id, { stage });
+    setMoveError(error ? "Não foi possível mover o contato. Tente novamente." : "");
+  };
 
   return (
     <div>
       <h1 style={styles.h1}>Funil de vendas</h1>
       <p style={styles.sub}>Arraste os cartões entre as etapas, ou use o menu de cada um.</p>
+      {moveError && <div role="alert" style={styles.authError}>{moveError}</div>}
       <div style={styles.kanban}>
         {STAGES.map((stage) => {
           const items = contacts.filter((c) => c.stage === stage.id);
@@ -1100,7 +1129,7 @@ function Funil({ contacts, onEdit }) {
                     <div style={styles.kanbanCardName}>{c.name}</div>
                     <div style={styles.kanbanCardCompany}>{c.company}</div>
                     <div style={styles.kanbanCardValue}>{fmtMoney(c.value)}</div>
-                    <select value={c.stage} onChange={(e) => moveStage(c.id, e.target.value)} style={styles.kanbanCardSelect}>
+                    <select aria-label={`Etapa de ${c.name}`} value={c.stage} onChange={(e) => moveStage(c.id, e.target.value)} style={styles.kanbanCardSelect}>
                       {STAGES.map((s) => (
                         <option key={s.id} value={s.id}>
                           {s.label}
@@ -1126,293 +1155,73 @@ function Funil({ contacts, onEdit }) {
 // roxo de apoio (mesmo tom do gradiente/ilustração do site).
 const HIRSCH_GREEN = "#22C55E";
 const HIRSCH_GREEN_DARK = "#15803D";
-const HIRSCH_PURPLE = "#7C3AED";
-
-// 6 passos, um por etapa do funil (novo lead -> ganho), do mais claro ao mais escuro
-const FUNNEL_COLORS = ["#86EFAC", "#4ADE80", "#22C55E", "#16A34A", "#15803D", "#14532D"];
-
-// Paleta categórica pro gráfico de região: verde e roxo da marca primeiro, depois cores de apoio
-const REGION_COLORS = ["#22C55E", "#7C3AED", "#0EA5E9", "#F59E0B", "#EC4899", "#14532D", "#4C1D95", "#0D9488", "#94A3B8"];
-
-function fmtBRLShort(v) {
-  const n = Number(v || 0);
-  if (n >= 1000) return "R$ " + (n / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "k";
-  return fmtMoney(n);
-}
-
-// Cabeçalho de card: título em negrito à esquerda, legenda cinza à direita
 function CardHead({ title, sub }) {
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-      <div style={{ ...styles.panelHeader, marginBottom: 0 }}>{title}</div>
-      {sub && <span style={{ fontSize: 12, color: "#9AA0A6" }}>{sub}</span>}
-    </div>
-  );
+  return <div style={{ marginBottom: 18 }}>
+    <h2 style={{ fontSize: 15, fontWeight: 650, margin: "0 0 5px" }}>{title}</h2>
+    {sub && <p style={{ fontSize: 12, color: "#596579", lineHeight: 1.6 }}>{sub}</p>}
+  </div>;
 }
 
-// Tooltip simples reutilizado pelos 3 gráficos customizados
-function useTooltip() {
-  const [tip, setTip] = useState(null);
-  const mostrar = (e, texto) => setTip({ x: e.clientX, y: e.clientY, texto });
-  const mover = (e) => setTip((t) => (t ? { ...t, x: e.clientX, y: e.clientY } : t));
-  const esconder = () => setTip(null);
-  const elemento = tip ? (
-    <div
-      style={{
-        position: "fixed",
-        left: tip.x,
-        top: tip.y,
-        transform: "translate(-50%, -130%)",
-        pointerEvents: "none",
-        background: "#1C2127",
-        color: "#fff",
-        fontSize: 11.5,
-        fontWeight: 600,
-        padding: "6px 9px",
-        borderRadius: 6,
-        whiteSpace: "nowrap",
-        zIndex: 50,
-      }}
-    >
-      {tip.texto}
-    </div>
-  ) : null;
-  return { mostrar, mover, esconder, elemento };
+function ChartTable({ dados, field, label, money = false }) {
+  return <details className="elo-chart-data"><summary>Ver dados do gráfico</summary>
+    <table><caption>{label}</caption><thead><tr><th>Mês</th><th>{money ? "Valor" : "Contatos"}</th></tr></thead>
+    <tbody>{dados.map((d) => <tr key={d.mes}><td>{d.mes}</td><td>{money ? fmtMoney(d[field]) : d[field]}</td></tr>)}</tbody></table>
+  </details>;
 }
 
-/* ---------------- Funil (barras que diminuem) ---------------- */
 function GraficoFunil({ funnelData, conversaoFunilPct, perdidos, ticketMedio }) {
-  const { mostrar, mover, esconder, elemento } = useTooltip();
-  const funnelMax = funnelData[0]?.total || 1;
-
-  return (
-    <>
-      <div style={{ display: "flex", flexDirection: "column" }}>
-        {funnelData.map((etapa, i) => {
-          const larguraPct = 30 + 70 * (etapa.total / funnelMax);
-          const anterior = funnelData[i - 1];
-          return (
-            <div key={etapa.id}>
-              {i > 0 && anterior && (
-                <div style={{ textAlign: "center", fontSize: 11, color: "#9AA0A6", padding: "5px 0" }}>
-                  ↓ {anterior.total > 0 ? Math.round((etapa.total / anterior.total) * 100) : 0}% avançam ·{" "}
-                  {anterior.total > 0 ? Math.round((1 - etapa.total / anterior.total) * 100) : 0}% saem nesta etapa
-                </div>
-              )}
-              <div style={{ display: "flex", justifyContent: "center" }}>
-                <div
-                  onMouseEnter={(e) => mostrar(e, `${etapa.label} · ${etapa.total}`)}
-                  onMouseMove={mover}
-                  onMouseLeave={esconder}
-                  style={{
-                    width: `${larguraPct}%`,
-                    height: 46,
-                    borderRadius: 4,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 8,
-                    background: FUNNEL_COLORS[i],
-                    color: "#fff",
-                    fontSize: 12.5,
-                    fontWeight: 650,
-                    cursor: "pointer",
-                  }}
-                >
-                  <span style={{ opacity: 0.92 }}>{etapa.label}</span>
-                  <span>{etapa.total}</span>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div style={{ display: "flex", gap: 24, marginTop: 16, paddingTop: 12, borderTop: "1px solid #DFE1DC" }}>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 16, color: "#1C2127" }}>{conversaoFunilPct}%</div>
-          <div style={{ fontSize: 11, color: "#9AA0A6" }}>conversão lead → ganho</div>
-        </div>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 16, color: "#1C2127" }}>{perdidos}</div>
-          <div style={{ fontSize: 11, color: "#9AA0A6" }}>perdidos no período</div>
-        </div>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 16, color: "#1C2127" }}>{fmtMoney(ticketMedio)}</div>
-          <div style={{ fontSize: 11, color: "#9AA0A6" }}>ticket médio fechado</div>
-        </div>
-      </div>
-      {elemento}
-    </>
-  );
+  const max = Math.max(1, ...funnelData.map((d) => d.total));
+  return <>
+    <div style={{ display: "grid", gap: 12 }}>
+      {funnelData.map((d) => <div key={d.id} style={{ display: "grid", gridTemplateColumns: "110px 1fr 32px", alignItems: "center", gap: 12, fontSize: 13 }}>
+        <span>{d.label}</span><div style={{ height: 12, borderRadius: 6, background: "#EEF2F1", overflow: "hidden" }}>
+          <div style={{ width: `${d.total / max * 100}%`, height: "100%", background: d.color, borderRadius: 6 }} />
+        </div><strong style={{ textAlign: "right" }}>{d.total}</strong>
+      </div>)}
+    </div>
+    <div className="elo-chart-stats">
+      <div><strong>{conversaoFunilPct === null ? "—" : `${conversaoFunilPct.toFixed(0)}%`}</strong><span>ganhos entre encerrados</span></div>
+      <div><strong>{perdidos}</strong><span>perdidos no total</span></div>
+      <div><strong>{fmtMoney(ticketMedio)}</strong><span>ticket médio ganho</span></div>
+    </div>
+  </>;
 }
 
-/* ---------------- Eixos compartilhados (linha + coluna) ---------------- */
-function Eixos({ w, h, padL, padR, padT, padB, maxVal, formatarTick }) {
-  const plotW = w - padL - padR;
-  const plotH = h - padT - padB;
-  const passos = 4;
-  const linhas = [];
-  for (let i = 0; i <= passos; i++) {
-    const y = padT + plotH - (plotH * i) / passos;
-    const val = (maxVal * i) / passos;
-    linhas.push(<line key={"g" + i} x1={padL} x2={w - padR} y1={y} y2={y} stroke={i === 0 ? "#C3C2B7" : "#E7E8E3"} strokeWidth={1} />);
-    linhas.push(
-      <text key={"l" + i} x={padL - 8} y={y + 3.5} textAnchor="end" fontSize={10.5} fill="#9AA0A6">
-        {formatarTick(val)}
-      </text>
-    );
-  }
-  return <>{linhas}</>;
-}
-
-/* ---------------- Valor fechado por mês (linha + área) ---------------- */
 function GraficoValorMensal({ dados }) {
-  const { mostrar, mover, esconder, elemento } = useTooltip();
-  const w = 760, h = 220, padL = 56, padR = 16, padT = 14, padB = 34;
-  const maxVal = Math.max(1000, ...dados.map((d) => d.valor)) * 1.15;
-  const plotW = w - padL - padR;
-  const plotH = h - padT - padB;
-  const n = dados.length || 1;
-  const stepX = plotW / Math.max(1, n - 1);
-  const xAt = (i) => padL + stepX * i;
-  const yAt = (v) => padT + plotH - (plotH * v) / maxVal;
-  const pontos = dados.map((d, i) => `${xAt(i)},${yAt(d.valor)}`).join(" L ");
-
-  return (
-    <div style={{ width: "100%", overflowX: "auto" }}>
-      <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", minWidth: 260, overflow: "visible" }}>
-        <Eixos w={w} h={h} padL={padL} padR={padR} padT={padT} padB={padB} maxVal={maxVal} formatarTick={(v) => "R$ " + Math.round(v / 1000) + "k"} />
-        <path d={`M ${xAt(0)},${padT + plotH} L ${pontos} L ${xAt(n - 1)},${padT + plotH} Z`} fill={HIRSCH_GREEN} opacity={0.12} />
-        <path d={`M ${pontos}`} fill="none" stroke={HIRSCH_GREEN} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-        {dados.map((d, i) => {
-          const cx = xAt(i), cy = yAt(d.valor);
-          return (
-            <g key={d.mes}>
-              <circle
-                cx={cx} cy={cy} r={4.5} fill={HIRSCH_GREEN} stroke="#fff" strokeWidth={2}
-                style={{ cursor: "pointer" }}
-                onMouseEnter={(e) => mostrar(e, `${d.mes} · ${fmtMoney(d.valor)}`)}
-                onMouseMove={mover}
-                onMouseLeave={esconder}
-              />
-              <text x={cx} y={h - 12} textAnchor="middle" fontSize={10.5} fill="#9AA0A6" transform={`rotate(-30 ${cx} ${h - 12})`}>
-                {d.mes}
-              </text>
-              {i === n - 1 && (
-                <text x={cx} y={cy - 12} textAnchor="end" fontSize={10.5} fontWeight={600} fill="#374151">
-                  {fmtBRLShort(d.valor)}
-                </text>
-              )}
-            </g>
-          );
-        })}
-      </svg>
-      {elemento}
-    </div>
-  );
+  return <><div style={{ width: "100%", height: 260 }}>
+    <ResponsiveContainer><AreaChart data={dados} margin={{ top: 16, right: 18, left: 20, bottom: 8 }} accessibilityLayer>
+      <CartesianGrid stroke="#E8EEEB" vertical={false} />
+      <XAxis dataKey="mes" tick={{ fontSize: 12, fill: "#596579" }} minTickGap={24} tickLine={false} axisLine={false} />
+      <YAxis tickFormatter={shortMoney} tick={{ fontSize: 12, fill: "#596579" }} width={90} tickLine={false} axisLine={false} />
+      <Tooltip formatter={(value) => [fmtMoney(value), "Valor ganho"]} />
+      <Area type="monotone" dataKey="valor" stroke={HIRSCH_GREEN_DARK} fill={HIRSCH_GREEN} fillOpacity={0.12} strokeWidth={3} dot={{ r: 3 }} isAnimationActive={false} />
+    </AreaChart></ResponsiveContainer>
+    </div><ChartTable dados={dados} field="valor" label="Valor de contatos ganhos por mês de entrada" money /></>;
 }
 
-/* ---------------- Negociações abertas por mês (colunas) ---------------- */
 function GraficoNegociacoesMensal({ dados }) {
-  const { mostrar, mover, esconder, elemento } = useTooltip();
-  const w = 760, h = 220, padL = 30, padR = 16, padT = 14, padB = 34;
-  const maxVal = Math.max(4, ...dados.map((d) => d.qtd)) * 1.15;
-  const plotW = w - padL - padR;
-  const plotH = h - padT - padB;
-  const n = dados.length || 1;
-  const slot = plotW / n;
-  const barW = Math.min(24, slot * 0.55);
-
-  return (
-    <div style={{ width: "100%", overflowX: "auto" }}>
-      <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", minWidth: 260, overflow: "visible" }}>
-        <Eixos w={w} h={h} padL={padL} padR={padR} padT={padT} padB={padB} maxVal={maxVal} formatarTick={(v) => String(Math.round(v))} />
-        {dados.map((d, i) => {
-          const cx = padL + slot * i + slot / 2;
-          const barH = (plotH * d.qtd) / maxVal;
-          const y = padT + plotH - barH;
-          return (
-            <g key={d.mes}>
-              <rect
-                x={cx - barW / 2} y={y} width={barW} height={Math.max(barH, 1)} rx={4}
-                fill={HIRSCH_GREEN}
-                style={{ cursor: "pointer" }}
-                onMouseEnter={(e) => mostrar(e, `${d.mes} · ${d.qtd} negociações`)}
-                onMouseMove={mover}
-                onMouseLeave={esconder}
-              />
-              <text x={cx} y={h - 12} textAnchor="middle" fontSize={10.5} fill="#9AA0A6" transform={`rotate(-30 ${cx} ${h - 12})`}>
-                {d.mes}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
-      {elemento}
-    </div>
-  );
+  return <><div style={{ width: "100%", height: 260 }}>
+    <ResponsiveContainer><BarChart data={dados} margin={{ top: 16, right: 12, left: -20, bottom: 8 }} accessibilityLayer>
+      <CartesianGrid stroke="#E8EEEB" vertical={false} />
+      <XAxis dataKey="mes" tick={{ fontSize: 12, fill: "#596579" }} minTickGap={24} tickLine={false} axisLine={false} />
+      <YAxis allowDecimals={false} tick={{ fontSize: 12, fill: "#596579" }} tickLine={false} axisLine={false} />
+      <Tooltip formatter={(value) => [value, "Contatos"]} />
+      <Bar dataKey="qtd" fill={HIRSCH_GREEN_DARK} radius={[5, 5, 0, 0]} maxBarSize={28} isAnimationActive={false} />
+    </BarChart></ResponsiveContainer>
+    </div><ChartTable dados={dados} field="qtd" label="Contatos por mês de entrada" /></>;
 }
 
-/* ---------------- Leads por região (rosca) ---------------- */
 function GraficoRegiaoPizza({ regionData }) {
-  const { mostrar, mover, esconder, elemento } = useTooltip();
-  const total = regionData.reduce((s, d) => s + d.total, 0);
-  const size = 220, r = 80, cx = size / 2, cy = size / 2, strokeW = 34;
-  const circumference = 2 * Math.PI * r;
-
-  let cumulative = 0;
-  const segments = regionData.map((d, i) => {
-    const frac = total > 0 ? d.total / total : 0;
-    const rawLen = frac * circumference;
-    const segLen = Math.max(rawLen - (regionData.length > 1 ? 2 : 0), 0);
-    const seg = { ...d, color: REGION_COLORS[i % REGION_COLORS.length], dasharray: `${segLen} ${circumference - segLen}`, dashoffset: -cumulative };
-    cumulative += rawLen;
-    return seg;
-  });
-
-  return (
-    <div style={{ display: "flex", gap: 28, alignItems: "center", flexWrap: "wrap" }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink: 0 }}>
-        <g transform={`rotate(-90 ${cx} ${cy})`}>
-          {segments.map((s, i) => (
-            <circle
-              key={i} cx={cx} cy={cy} r={r} fill="none" stroke={s.color} strokeWidth={strokeW}
-              strokeDasharray={s.dasharray} strokeDashoffset={s.dashoffset}
-              style={{ cursor: "pointer" }}
-              onMouseEnter={(e) => mostrar(e, `${s.nome} · ${s.faixaDDD} · ${s.total} leads`)}
-              onMouseMove={mover}
-              onMouseLeave={esconder}
-            />
-          ))}
-        </g>
-        <text x={cx} y={cy - 4} textAnchor="middle" fontSize={22} fontWeight={700} fill="#1C2127">
-          {total}
-        </text>
-        <text x={cx} y={cy + 15} textAnchor="middle" fontSize={11} fill="#9AA0A6">
-          leads
-        </text>
-      </svg>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 180, flex: 1 }}>
-        {regionData.map((d, i) => (
-          <div key={d.nome} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
-            <span style={{ width: 10, height: 10, borderRadius: 3, background: REGION_COLORS[i % REGION_COLORS.length], flexShrink: 0 }} />
-            <span style={{ flex: 1, color: "#374151" }}>{d.nome}</span>
-            <span style={{ fontWeight: 600, color: "#1C2127" }}>{d.total}</span>
-            <span style={{ color: "#9AA0A6", width: 38, textAlign: "right" }}>{total > 0 ? Math.round((d.total / total) * 100) : 0}%</span>
-          </div>
-        ))}
-      </div>
-      {elemento}
-    </div>
-  );
+  const total = regionData.reduce((sum, d) => sum + d.total, 0);
+  return <div style={{ display: "grid", gap: 16 }}>{regionData.map((d) => <div key={d.nome}>
+    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 7 }}><span>{d.nome}</span><strong>{d.total} · {total ? Math.round(d.total / total * 100) : 0}%</strong></div>
+    <div style={{ height: 8, background: "#EEF2F1", borderRadius: 4 }}><div style={{ height: "100%", width: `${total ? d.total / total * 100 : 0}%`, background: HIRSCH_GREEN_DARK, borderRadius: 4 }} /></div>
+  </div>)}</div>;
 }
-
-/* ============================================================
-   GRÁFICOS (aba principal)
-   ============================================================ */
 
 function Graficos({ contacts }) {
-  const months = lastMonthKeys(12);
+  const [monthCount, setMonthCount] = useState(12);
+  const months = lastMonthKeys(monthCount);
 
   const revenueData = months.map((key) => ({
     mes: monthLabel(key),
@@ -1429,7 +1238,7 @@ function Graficos({ contacts }) {
   const won = contacts.filter((c) => c.stage === "ganho");
   const lost = contacts.filter((c) => c.stage === "perdido");
   const closedTotal = won.length + lost.length;
-  const conversionRate = closedTotal === 0 ? null : (won.length / closedTotal) * 100;
+  const conversionRate = getConversionRate(contacts);
   const closingData = [
     { name: "Ganho", qtd: won.length, color: HIRSCH_GREEN_DARK },
     { name: "Perdido", qtd: lost.length, color: "#DC2626" },
@@ -1443,28 +1252,32 @@ function Graficos({ contacts }) {
 
   const regionData = agruparPorRegiao(contacts.map((c) => c.phone));
 
-  const funnelStages = STAGES.filter((s) => s.id !== "perdido");
+  const funnelStages = STAGES;
   const funnelData = funnelStages.map((s) => ({
     id: s.id,
     label: s.label,
+    color: s.color,
     total: contacts.filter((c) => c.stage === s.id).length,
   }));
-  const funnelMax = funnelData[0]?.total || 1;
-  const conversaoFunilPct = funnelMax > 0 ? Math.round((funnelData[funnelData.length - 1].total / funnelMax) * 100) : 0;
+  const conversaoFunilPct = conversionRate;
 
   const totalRegiao = regionData.reduce((s, d) => s + d.total, 0);
-  const rowStyle = { display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" };
+  const rowStyle = { display: "flex", gap: 18, flexWrap: "wrap", alignItems: "stretch" };
   const halfPanel = { ...styles.panel, flex: "1 1 360px", minWidth: 0 };
 
   return (
     <div>
-      <h1 style={styles.h1}>Gráficos</h1>
-      <p style={styles.sub}>Uma visão simples do seu negócio ao longo do tempo.</p>
+      <div style={styles.headerRow}><div><h1 style={styles.h1}>Gráficos</h1>
+      <p style={styles.sub}>Entenda de onde vêm seus contatos e como as negociações estão hoje.</p></div>
+      <label style={{ fontSize: 13 }}>Evolução mensal <select aria-label="Período dos gráficos mensais" style={styles.filterSelect} value={monthCount} onChange={(e) => setMonthCount(Number(e.target.value))}>
+        <option value={6}>Últimos 6 meses</option><option value={12}>Últimos 12 meses</option>
+      </select></label></div>
+      <p style={{ fontSize: 12, color: "#596579", marginBottom: 20, lineHeight: 1.6 }}>Distribuição e fechamento consideram todos os contatos no estado atual. Os gráficos mensais usam a data de entrada; não representam a data do fechamento.</p>
 
       <div style={rowStyle}>
         <div style={halfPanel}>
-          <CardHead title="Funil de vendas" sub="do primeiro contato ao fechamento" />
-          {funnelMax === 0 ? (
+          <CardHead title="Contatos por etapa" sub="Distribuição atual · total de contatos" />
+          {contacts.length === 0 ? (
             <EmptyRow text="Ainda não há contatos no funil." />
           ) : (
             <GraficoFunil funnelData={funnelData} conversaoFunilPct={conversaoFunilPct} perdidos={lost.length} ticketMedio={ticketMedio} />
@@ -1472,13 +1285,13 @@ function Graficos({ contacts }) {
         </div>
 
         <div style={halfPanel}>
-          <CardHead title="Leads" sub="quantidade de leads recebidos por mês" />
+          <CardHead title="Novos contatos" sub={`Últimos ${monthCount} meses · mês de entrada`} />
           <GraficoNegociacoesMensal dados={dealsPerMonthData} />
         </div>
       </div>
 
       <div style={styles.panel}>
-        <CardHead title="Valor fechado por mês" sub="negociações ganhas, de janeiro a dezembro · R$" />
+        <CardHead title="Valor ganho por mês de entrada" sub={`Últimos ${monthCount} meses · contatos atualmente ganhos`} />
         <GraficoValorMensal dados={revenueData} />
       </div>
 
@@ -1503,12 +1316,12 @@ function Graficos({ contacts }) {
 
       <div style={rowStyle}>
         <div style={halfPanel}>
-          <CardHead title="Leads por região" sub={`identificada pelo DDD do WhatsApp · ${totalRegiao} leads`} />
+          <CardHead title="Região do DDD" sub={`Inferida do número, não da localização atual · ${totalRegiao} contatos`} />
           {regionData.length === 0 ? <EmptyRow text="Nenhum telefone com DDD identificável ainda." /> : <GraficoRegiaoPizza regionData={regionData} />}
         </div>
 
         <div style={halfPanel}>
-          <CardHead title="Fechamento" sub={conversionRate !== null ? `${conversionRate.toFixed(0)}% de conversão` : undefined} />
+          <CardHead title="Fechamento" sub={conversionRate !== null ? `${conversionRate.toFixed(0)}% de ganhos entre ${closedTotal} encerrados` : undefined} />
           {closedTotal === 0 ? (
             <EmptyRow text="Ainda não há contatos fechados (ganhos ou perdidos)." />
           ) : (
@@ -1544,9 +1357,16 @@ function Tarefas({ tasks, contacts, onAdd, onToggle, onRemove }) {
   const [contactId, setContactId] = useState("");
   const [dueDate, setDueDate] = useState("");
 
-  const add = () => {
-    if (!title.trim()) return;
-    onAdd({ title, contact_id: contactId || null, due_date: dueDate || null });
+  const [adding, setAdding] = useState(false);
+  const [taskError, setTaskError] = useState("");
+  const add = async () => {
+    if (adding) return;
+    if (!title.trim()) { setTaskError("Informe o título da tarefa."); return; }
+    setAdding(true);
+    const error = await onAdd({ title, contact_id: contactId || null, due_date: dueDate || null });
+    setAdding(false);
+    if (error) { setTaskError("Não foi possível salvar a tarefa. Tente novamente."); return; }
+    setTaskError("");
     setTitle("");
     setContactId("");
     setDueDate("");
@@ -1560,15 +1380,16 @@ function Tarefas({ tasks, contacts, onAdd, onToggle, onRemove }) {
       <p style={styles.sub}>{tasks.filter((t) => !t.done).length} pendentes</p>
 
       <div style={styles.panel}>
+        {taskError && <div role="alert" style={styles.authError}>{taskError}</div>}
         <div style={styles.taskAddRow}>
           <input
             style={{ ...styles.input, flex: 2 }}
-            placeholder="Nova tarefa…"
+            aria-label="Título da nova tarefa" placeholder="Nova tarefa…"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && add()}
           />
-          <select style={{ ...styles.input, flex: 1 }} value={contactId} onChange={(e) => setContactId(e.target.value)}>
+          <select aria-label="Contato da tarefa" style={{ ...styles.input, flex: 1 }} value={contactId} onChange={(e) => setContactId(e.target.value)}>
             <option value="">Sem contato</option>
             {contacts.map((c) => (
               <option key={c.id} value={c.id}>
@@ -1576,8 +1397,8 @@ function Tarefas({ tasks, contacts, onAdd, onToggle, onRemove }) {
               </option>
             ))}
           </select>
-          <input style={{ ...styles.input, flex: 1 }} type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
-          <button style={styles.primaryBtn} onClick={add}>
+          <input aria-label="Prazo da tarefa" style={{ ...styles.input, flex: 1 }} type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+          <button aria-label="Adicionar tarefa" disabled={adding} style={styles.primaryBtn} onClick={add}>
             <Plus size={16} />
           </button>
         </div>
@@ -1591,7 +1412,7 @@ function Tarefas({ tasks, contacts, onAdd, onToggle, onRemove }) {
             const c = contacts.find((c) => c.id === t.contact_id);
             return (
               <div key={t.id} style={styles.taskRow}>
-                <button style={styles.checkBtn} onClick={() => onToggle(t.id, t.done)}>
+                <button aria-label={`${t.done ? "Reabrir" : "Concluir"} tarefa ${t.title}`} style={styles.checkBtn} onClick={() => onToggle(t.id, t.done)}>
                   {t.done ? <CheckCircle2 size={18} color="#3C8558" /> : <Circle size={18} color="#9AA0A6" />}
                 </button>
                 <span style={{ flex: 1, textDecoration: t.done ? "line-through" : "none", color: t.done ? "#9AA0A6" : "#1C2127" }}>
@@ -1604,7 +1425,7 @@ function Tarefas({ tasks, contacts, onAdd, onToggle, onRemove }) {
                     {fmtDate(t.due_date)}
                   </span>
                 )}
-                <button style={styles.iconBtn} onClick={() => onRemove(t.id)}>
+                <button aria-label={`Excluir tarefa ${t.title}`} style={styles.iconBtn} onClick={() => { if (window.confirm(`Excluir a tarefa ${t.title}?`)) onRemove(t.id); }}>
                   <Trash2 size={14} />
                 </button>
               </div>
@@ -1783,7 +1604,7 @@ function Ajuda() {
    PLANOS
    ============================================================ */
 
-function Planos({ org, remaining, isActive }) {
+function Planos({ remaining, isActive }) {
   return (
     <div>
       <h1 style={styles.h1}>Planos</h1>
@@ -1809,12 +1630,7 @@ function Planos({ org, remaining, isActive }) {
           Contatos, funil de vendas, tarefas e lembretes ilimitados para sua empresa. O valor da assinatura ainda
           será definido — por enquanto, aproveite o período de teste gratuito.
         </p>
-        <a
-          href={STRIPE_PAYMENT_LINK}
-          style={{ ...styles.primaryBtn, textDecoration: "none", display: "inline-flex" }}
-        >
-          Assinar agora
-        </a>
+        <SubscribeButton style={{ ...styles.primaryBtn, textDecoration: "none", display: "inline-flex" }} />
       </div>
     </div>
   );
@@ -1836,12 +1652,7 @@ function Pagamentos({ org, isActive }) {
           Status: <strong>{isActive ? "Ativa" : org?.subscription_status === "trialing" ? "Em teste" : org?.subscription_status || "—"}</strong>
         </p>
         {!isActive && (
-          <a
-            href={STRIPE_PAYMENT_LINK}
-            style={{ ...styles.primaryBtn, textDecoration: "none", display: "inline-flex" }}
-          >
-            Assinar agora
-          </a>
+          <SubscribeButton style={{ ...styles.primaryBtn, textDecoration: "none", display: "inline-flex" }} />
         )}
       </div>
 
@@ -1858,12 +1669,35 @@ function Pagamentos({ org, isActive }) {
    ============================================================ */
 
 function Modal({ title, children, onClose }) {
+  const titleId = useId();
+  const box = useRef(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const previous = document.activeElement;
+    const dialog = box.current;
+    const nodes = () => [...dialog.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]')];
+    (dialog.querySelector("[autofocus]") || nodes().find((node) => ["INPUT", "SELECT", "TEXTAREA"].includes(node.tagName)) || nodes()[0])?.focus();
+    const keydown = (event) => {
+      if (event.key === "Escape") closeRef.current();
+      if (event.key === "Tab") {
+        const items = nodes();
+        const first = items[0], last = items.at(-1);
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      }
+    };
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", keydown);
+    return () => { document.body.style.overflow = overflow; document.removeEventListener("keydown", keydown); previous?.focus(); };
+  }, []);
   return (
     <div style={styles.modalOverlay} onClick={onClose}>
-      <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
+      <div ref={box} role="dialog" aria-modal="true" aria-labelledby={titleId} style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
         <div style={styles.modalHeader}>
-          <span>{title}</span>
-          <button style={styles.iconBtn} onClick={onClose}>
+          <span id={titleId}>{title}</span>
+          <button aria-label="Fechar janela" style={styles.iconBtn} onClick={onClose}>
             <X size={16} />
           </button>
         </div>
@@ -1874,10 +1708,11 @@ function Modal({ title, children, onClose }) {
 }
 
 function Field({ label, children }) {
+  const id = useId();
   return (
     <div style={{ marginBottom: 12, flex: 1 }}>
-      <div style={styles.fieldLabel}>{label}</div>
-      {children}
+      <label htmlFor={id} style={{ ...styles.fieldLabel, display: "block" }}>{label}</label>
+      {React.isValidElement(children) ? React.cloneElement(children, { id }) : children}
     </div>
   );
 }
@@ -1922,7 +1757,7 @@ const styles = {
   settingsMenuItem: { display: "flex", alignItems: "center", gap: 9, padding: "8px 10px", borderRadius: 7, border: "none", background: "transparent", color: "#B8BEC9", fontSize: 13, cursor: "pointer", textAlign: "left" },
   settingsMenuItemActive: { background: "#22C55E22", color: "#4ADE80", fontWeight: 600 },
   logoutBtn: { display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, border: "none", background: "transparent", color: "#6B7280", fontSize: 13, cursor: "pointer" },
-  main: { flex: 1, padding: "26px 32px", overflowY: "auto" },
+  main: { minWidth: 0, flex: 1, padding: "26px 32px", overflowY: "auto" },
   h1: { fontSize: 21, fontWeight: 600, margin: 0, letterSpacing: "-0.01em" },
   sub: { fontSize: 13, color: "#6B7178", margin: "4px 0 18px 0" },
   headerRow: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 },
@@ -1930,7 +1765,7 @@ const styles = {
   metricCard: { background: "#FFFFFF", border: "1px solid #E2E3DE", borderRadius: 8, padding: "14px 16px" },
   metricLabel: { fontSize: 12, color: "#6B7178", marginBottom: 6 },
   metricValue: { fontSize: 21, fontWeight: 600, letterSpacing: "-0.01em" },
-  panel: { background: "#FFFFFF", border: "1px solid #E2E3DE", borderRadius: 8, padding: 18, marginBottom: 18 },
+  panel: { background: "#FFFFFF", border: "1px solid #E2E8E4", borderRadius: 14, padding: 22, boxShadow: "0 2px 8px rgba(15, 35, 25, 0.03)", marginBottom: 18 },
   panelHeader: { fontSize: 13.5, fontWeight: 600, marginBottom: 12 },
   emptyRow: { color: "#9AA0A6", fontSize: 13, padding: "10px 2px" },
   taskRowMini: { display: "flex", alignItems: "center", gap: 9, padding: "7px 0", borderTop: "1px solid #EFF0EC", fontSize: 13 },
@@ -1987,7 +1822,7 @@ const styles = {
   authBrandContent: { maxWidth: 440, margin: "0 auto" },
   authByHirsch: { fontSize: 11.5, color: "#7C8493", fontWeight: 600, letterSpacing: "0.02em", marginTop: 6 },
   authSupportNote: { fontSize: 12, color: "#7C8493", marginTop: 30 },
-  authPitchTitle: { fontSize: 28, fontWeight: 700, letterSpacing: "-0.01em", lineHeight: 1.25, margin: "28px 0 14px 0" },
+  authPitchTitle: { color: "#FFFFFF", fontSize: 28, fontWeight: 700, letterSpacing: "-0.01em", lineHeight: 1.25, margin: "28px 0 14px 0" },
   authPitchSub: { fontSize: 14, color: "#B8BEC9", lineHeight: 1.6, marginBottom: 26 },
   authPitchList: { display: "flex", flexDirection: "column", gap: 12 },
   authPitchItem: { display: "flex", alignItems: "flex-start", gap: 10, fontSize: 13.5, color: "#EDEEEA" },
@@ -2015,7 +1850,6 @@ const styles = {
 };
 
 const globalCss = `
-  @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
   html { color-scheme: light; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; width: 100%; min-height: 100%; }
