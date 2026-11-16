@@ -119,7 +119,7 @@ export default function AdminAccessPanel({ onRefreshAccess }) {
           {filtered.map((account) => {
             const draft = drafts[account.organization_id];
             if (!draft) return null;
-            const changed = draft.mode !== account.mode || (isTimed(draft.mode) && draft.expires_on !== (account.expires_on || ""));
+            const changed = !account.has_override || draft.mode !== account.mode || (isTimed(draft.mode) && draft.expires_on !== (account.expires_on || ""));
             return (
               <section key={account.organization_id} style={{ border: "1px solid #E3E7E2", background: "#FFF", borderRadius: 12, padding: 16 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 8, flexWrap: "wrap" }}>
@@ -128,6 +128,7 @@ export default function AdminAccessPanel({ onRefreshAccess }) {
                     <div style={{ fontSize: 12, color: "#68747C", marginTop: 4 }}>
                       {account.members} integrante(s): {account.member_summary || "Nenhum perfil"}
                     </div>
+                    {!account.has_override && <div style={{ fontSize: 11, color: "#897135", marginTop: 4 }}>Modalidade herdada das regras antigas · ainda sem definição manual</div>}
                   </div>
                   <div style={{
                     fontSize: 11.5, fontWeight: 650, borderRadius: 20, border: "1px solid #D9E0DB",
