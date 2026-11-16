@@ -17,6 +17,7 @@ const server = await createServer({
 });
 try {
   const { Graficos, Painel, Contatos, AuthScreen, Paywall } = await server.ssrLoadModule('/src/App.jsx');
+  const { default: AdminAccessPanel } = await server.ssrLoadModule('/src/AdminAccessPanel.jsx');
   const contacts = [
     { id: '1', name: 'QA', stage: 'ganho', value: 1000, created_at: '2026-09-29T12:00:00Z' },
     { id: '2', name: 'QA', stage: 'perdido', value: 500, created_at: '2026-09-29T12:00:00Z' },
@@ -33,7 +34,11 @@ try {
   assert.ok(render(Contatos, { contacts: [], onAdd() {}, onEdit() {}, onRemove() {} }).includes('aria-label="Buscar contatos"'), 'search should have an accessible name');
   assert.ok(render(AuthScreen).includes('color:#FFFFFF'), 'brand title should have explicit contrast');
   assert.ok(!render(Paywall).includes('href="#"'), 'unconfigured payment must not have a broken link');
-  console.log('Render checks passed: conversion, stage labels, tables, empty states, search semantics and payment fallback.');
+  const adminView = render(AdminAccessPanel, { onRefreshAccess() {} });
+  assert.ok(adminView.includes('Gestão de acessos'), 'admin panel heading should render');
+  assert.ok(adminView.includes('Pesquisar organizações ou integrantes'), 'admin search should be labeled');
+  assert.ok(render(Paywall, { mode: 'blocked' }).includes('acesso desta organização está suspenso'), 'blocked organizations should see suspension message');
+    console.log('Render checks passed: conversion, stage labels, tables, empty states, search semantics and payment fallback.');
 } finally {
   await server.close();
 }
