@@ -28,6 +28,11 @@ test("Comma CSV with accent-insensitive names and dates", () => {
   assert.equal(parsed.rows[0].next_reminder_date, "2026-11-20");
 });
 
+test("Import recognizes Cobrar as a pipeline status", () => {
+  const parsed = parseContactCSV("Nome;Telefone;Status\nTeste;11988887777;Cobrar");
+  assert.equal(parsed.issues.length, 0);
+  assert.equal(parsed.rows[0].stage, "cobrar");
+});
 test("Invalid lines are excluded rather than imported", () => {
   const parsed = parseContactCSV("Nome;Telefone;Status;Próximo contato\n;11999998888;;\nAna;123;Novo;\nBob;11988887777;Inexistente;\nCarol;11999996666;Novo;31/02/2026\nDani;11999995555;Novo;");
   assert.equal(parsed.rows.length, 1);
