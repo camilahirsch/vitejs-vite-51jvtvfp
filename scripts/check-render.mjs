@@ -12,11 +12,11 @@ const server = await createServer({
   server: { middlewareMode: true, hmr: false },
   appType: 'custom',
   plugins: [{ name: 'render-check-exports', enforce: 'pre', transform(code, id) {
-    if (id.endsWith('/src/App.jsx')) return `${code}\nexport { Graficos, Painel, Contatos, AuthScreen, Paywall };`;
+    if (id.endsWith('/src/App.jsx')) return `${code}\nexport { Graficos, Painel, Contatos, Funil, AuthScreen, Paywall };`;
   } }],
 });
 try {
-  const { Graficos, Painel, Contatos, AuthScreen, Paywall } = await server.ssrLoadModule('/src/App.jsx');
+  const { Graficos, Painel, Contatos, Funil, AuthScreen, Paywall } = await server.ssrLoadModule('/src/App.jsx');
   const { default: AdminAccessPanel } = await server.ssrLoadModule('/src/AdminAccessPanel.jsx');
   const { default: ContactHistory } = await server.ssrLoadModule('/src/ContactHistory.jsx');
   const contacts = [
@@ -38,6 +38,7 @@ try {
   const contactView = render(Contatos, {contacts:[],onAdd(){},onEdit(){},onRemove(){},onImport(){}});
   assert.ok(contactView.includes('Importar contatos'), 'contacts screen should offer bulk import');
   assert.ok(contactView.includes('Novo contato'), 'manual contact creation should remain available');
+  assert.ok(render(Funil, { contacts: [], onEdit() {} }).includes('Cobrar'), 'funnel should include Cobrar status');
   const activity = render(ContactHistory, { contact: {id:'example',organization_id:'org',stage:'novo'}, stages:[{id:'novo',label:'Novo lead'}] });
   assert.ok(activity.includes('Histórico de interações'), 'individual contact should show its history');
   assert.ok(activity.includes('Cobrança / financeiro'), 'interaction types should support financial follow-up');

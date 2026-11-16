@@ -68,6 +68,7 @@ const STAGES = [
   { id: "qualificado", label: "Qualificado", color: "#38BDF8" },
   { id: "proposta", label: "Proposta enviada", color: "#4ADE80" },
   { id: "negociacao", label: "Em negociação", color: "#22C55E" },
+  { id: "cobrar", label: "Cobrar", color: "#D97706" },
   { id: "ganho", label: "Ganho", color: "#15803D" },
   { id: "perdido", label: "Perda", color: "#DC2626" },
 ];
