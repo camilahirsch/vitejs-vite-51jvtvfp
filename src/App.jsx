@@ -1159,7 +1159,7 @@ function Contatos({ contacts, onAdd, onEdit, onRemove, onImport, onRefresh }) {
               await onRefresh?.();
             }}/>
           )}
-          {saveError && <div role="alert" style={styles.authError}>{saveError}</div>
+          {saveError && <div role="alert" style={styles.authError}>{saveError}</div>}
           <div style={styles.modalFoot}>
             <button style={styles.secondaryBtn} onClick={() => setShowForm(false)}>
               Cancelar
