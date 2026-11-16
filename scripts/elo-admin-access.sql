@@ -297,6 +297,15 @@ create trigger elo_protect_profile_organization
   before update on public.profiles
   for each row execute function public.elo_protect_profile_organization();
 
+-- Supabase may grant EXECUTE directly to anon despite a REVOKE FROM PUBLIC.
+revoke execute on function public.elo_is_admin() from anon;
+revoke execute on function public.elo_org_has_access(uuid) from anon;
+revoke execute on function public.elo_my_access() from anon;
+revoke execute on function public.elo_admin_accounts() from anon;
+revoke execute on function public.elo_admin_set_access(uuid,text,date) from anon;
+revoke execute on function public.elo_prevent_customer_subscription_edit() from anon, authenticated;
+revoke execute on function public.elo_protect_profile_organization() from anon, authenticated;
+
 commit;
 
 -- BOOTSTRAP MANUAL: substituir o endereço por aquele da conta que administrará o Elo
