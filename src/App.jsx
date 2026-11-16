@@ -1114,7 +1114,7 @@ function Contatos({ contacts, onAdd, onEdit, onRemove, onImport, onRefresh }) {
               <input style={styles.input} type="date" value={editing.first_contact_date || ""}
                 onChange={(e) => setEditing({ ...editing, first_contact_date: e.target.value })}/>
             </Field>
-          </div>}
+          </div>
 
           <div style={styles.fieldRow}>
             <Field label="Data do último contato">
