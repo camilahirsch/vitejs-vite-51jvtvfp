@@ -251,6 +251,14 @@ begin
   end if;
 end $$;
 
+-- Activity log também deve ficar indisponível para organizações bloqueadas.
+alter table public.activity_log enable row level security;
+drop policy if exists elo_commercial_access on public.activity_log;
+create policy elo_commercial_access on public.activity_log
+  as restrictive for all to authenticated
+  using (public.elo_org_has_access(organization_id))
+  with check (public.elo_org_has_access(organization_id));
+
 -- Protege contra mudança de assinatura/período pelo frontend.
 -- Revise esta trigger se houver integração de cobrança que atualize estes campos.
 create or replace function public.elo_prevent_customer_subscription_edit()
