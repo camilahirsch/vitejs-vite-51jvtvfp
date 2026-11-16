@@ -231,7 +231,7 @@ create policy elo_commercial_access on public.tasks
 
 -- Etapas do funil e histórico de interações também devem respeitar bloqueios.
 -- O segundo histórico é opcional, pois só existe após instalar a melhoria de Contatos.
-do $
+do $$
 begin
   if to_regclass('public.deal_stage_history') is not null then
     execute 'alter table public.deal_stage_history enable row level security';
@@ -249,7 +249,7 @@ begin
       using (public.elo_org_has_access(organization_id))
       with check (public.elo_org_has_access(organization_id))';
   end if;
-end $;
+end $$;
 
 -- Protege contra mudança de assinatura/período pelo frontend.
 -- Revise esta trigger se houver integração de cobrança que atualize estes campos.
@@ -275,7 +275,7 @@ create trigger elo_prevent_customer_subscription_edit
 -- direto da coluna organization_id por um cliente autenticado.
 create or replace function public.elo_protect_profile_organization()
 returns trigger language plpgsql security invoker set search_path = ''
-as $
+as $$
 begin
   if new.organization_id is distinct from old.organization_id
     and current_user = 'authenticated' then
@@ -283,7 +283,7 @@ begin
   end if;
   return new;
 end;
-$;
+$$;
 drop trigger if exists elo_protect_profile_organization on public.profiles;
 create trigger elo_protect_profile_organization
   before update on public.profiles
