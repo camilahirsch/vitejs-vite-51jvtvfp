@@ -395,7 +395,7 @@ export default function EloCRM() {
         )}
         {tab === "dados" && <Dados profile={profile} org={org} email={session?.user?.email} />}
         {tab === "ajuda" && <Ajuda />}
-        {tab === "planos" && <Planos remaining={remaining} isActive={isActive} />}
+        {tab === "planos" && <Planos remaining={remaining} isActive={isActive} mode={access.mode} expiresOn={access.expires_on} isAdmin={access.is_admin} />}
         {tab === "pagamentos" && <Pagamentos org={org} isActive={isActive} mode={access.mode} />}
         {tab === "admin_access" && access.is_admin && <AdminAccessPanel onRefreshAccess={refreshAccess} />}
       </main>
@@ -1638,7 +1638,7 @@ function Ajuda() {
    PLANOS
    ============================================================ */
 
-function Planos({ remaining, isActive }) {
+function Planos({ remaining, isActive, mode, expiresOn, isAdmin }) {
   return (
     <div>
       <h1 style={styles.h1}>Planos</h1>
@@ -1647,8 +1647,14 @@ function Planos({ remaining, isActive }) {
       <div style={styles.panel}>
         <div style={styles.panelHeader}>Status atual</div>
         <p style={{ fontSize: 13.5, color: "#374151", marginBottom: 4 }}>
-          {isActive
-            ? "Assinatura ativa."
+          {isAdmin
+            ? "Acesso administrativo da Hirsch."
+            : mode === "free"
+            ? "Acesso gratuito permanente."
+            : mode === "courtesy"
+            ? "Cortesia válida até " + (expiresOn || "—") + "."
+            : mode === "paid"
+            ? "Acesso pago liberado pela administração."
             : remaining !== null && remaining > 0
             ? `Período de teste — faltam ${remaining} dia${remaining === 1 ? "" : "s"}.`
             : "Período de teste encerrado."}
