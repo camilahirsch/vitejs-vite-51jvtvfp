@@ -303,7 +303,9 @@ revoke execute on function public.elo_org_has_access(uuid) from anon;
 revoke execute on function public.elo_my_access() from anon;
 revoke execute on function public.elo_admin_accounts() from anon;
 revoke execute on function public.elo_admin_set_access(uuid,text,date) from anon;
+revoke all on function public.elo_prevent_customer_subscription_edit() from public;
 revoke execute on function public.elo_prevent_customer_subscription_edit() from anon, authenticated;
+revoke all on function public.elo_protect_profile_organization() from public;
 revoke execute on function public.elo_protect_profile_organization() from anon, authenticated;
 
 commit;
