@@ -24,6 +24,7 @@ import {
   HelpCircle,
   Layers,
   Receipt,
+  ShieldCheck,
 } from "lucide-react";
 import {
   AreaChart,
@@ -38,6 +39,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import { supabase } from "./supabaseClient";
+import AdminAccessPanel from "./AdminAccessPanel";
 import { agruparPorRegiao } from "./ddd";
 import { conversionRate as getConversionRate, localDate, shortMoney, validateContact, duplicateContact } from "./crm";
 
@@ -187,6 +189,7 @@ export default function EloCRM() {
   const [tasks, setTasks] = useState([]);
   const [tab, setTab] = useState("painel");
   const [dataError, setDataError] = useState("");
+  const [access, setAccess] = useState(undefined);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null));
@@ -221,6 +224,17 @@ export default function EloCRM() {
       setOrg(data || null);
     })();
   }, [profile]);
+
+  const refreshAccess = useCallback(async () => {
+    const { data, error } = await supabase.rpc("elo_my_access").single();
+    if (error) setAccess({ error: error.message, allowed: false });
+    else setAccess(data);
+  }, []);
+
+  useEffect(() => {
+    setAccess(undefined);
+    if (profile) refreshAccess();
+  }, [profile, refreshAccess]);
 
   const loadData = useCallback(async () => {
     if (!profile) return;
@@ -339,21 +353,37 @@ export default function EloCRM() {
   if (!session) return <AuthScreen />;
   if (!profile || !org) return <LoadingScreen text="Preparando sua conta…" />;
 
-  const remaining = daysLeft(org.trial_ends_at);
-  const isActive = org.subscription_status === "active";
-  const trialExpired = !isActive && remaining !== null && remaining <= 0;
+  if (access === undefined) return <LoadingScreen text="Verificando seu acesso…" />;
+  if (access.error) {
+    return (
+      <div style={styles.authWrap}>
+        <div style={styles.authCard}>
+          <h1 style={{ fontSize: 17 }}>Não foi possível verificar seu acesso</h1>
+          <p style={{ color: "#AA332C", lineHeight: 1.5 }}>{access.error}</p>
+          <button style={styles.primaryBtn} onClick={refreshAccess}>Tentar novamente</button>
+          <button style={{ ...styles.secondaryBtn, marginTop: 8 }} onClick={() => supabase.auth.signOut()}>Sair</button>
+        </div>
+      </div>
+    );
+  }
+
+  const remaining = access.mode === "trial" && access.expires_on
+    ? Math.ceil((new Date(access.expires_on + "T23:59:59").getTime() - Date.now()) / (24 * 3600 * 1000))
+    : daysLeft(org.trial_ends_at);
+  const isActive = access.allowed && (access.is_admin || ["paid", "free", "courtesy"].includes(access.mode));
+  const trialExpired = !access.allowed;
 
   if (trialExpired) {
-    return <Paywall />;
+    return <Paywall mode={access.mode} />;
   }
 
   return (
     <div style={styles.app}>
       <style>{globalCss}</style>
-      <Sidebar tab={tab} setTab={setTab} />
+      <Sidebar tab={tab} setTab={setTab} isAdmin={access.is_admin} />
       <main style={styles.main}>
         {dataError && <div role="alert" style={styles.authError}>{dataError} <button style={styles.secondaryBtn} onClick={loadData}>Tentar novamente</button></div>}
-        {!isActive && remaining !== null && <TrialBanner daysLeft={remaining} />}
+        {access.mode === "trial" && remaining !== null && !access.is_admin && <TrialBanner daysLeft={remaining} />}
         {tab === "painel" && <Painel contacts={contacts} tasks={tasks} />}
         {tab === "contatos" && (
           <Contatos contacts={contacts} onAdd={addContact} onEdit={editContact} onRemove={removeContact} />
@@ -366,7 +396,8 @@ export default function EloCRM() {
         {tab === "dados" && <Dados profile={profile} org={org} email={session?.user?.email} />}
         {tab === "ajuda" && <Ajuda />}
         {tab === "planos" && <Planos remaining={remaining} isActive={isActive} />}
-        {tab === "pagamentos" && <Pagamentos org={org} isActive={isActive} />}
+        {tab === "pagamentos" && <Pagamentos org={org} isActive={isActive} mode={access.mode} />}
+        {tab === "admin_access" && access.is_admin && <AdminAccessPanel onRefreshAccess={refreshAccess} />}
       </main>
     </div>
   );
@@ -390,7 +421,7 @@ function TrialBanner({ daysLeft }) {
   );
 }
 
-function Paywall() {
+function Paywall({ mode }) {
   return (
     <div style={styles.authWrap}>
       <style>{globalCss}</style>
@@ -400,7 +431,9 @@ function Paywall() {
           <span style={{ color: "#1C2127" }}>Elo</span>
         </div>
         <p style={{ fontSize: 13.5, color: "#5B626B", lineHeight: 1.5, marginBottom: 18 }}>
-          {PAYMENTS_ENABLED ? "Seu período de teste grátis acabou. Assine para continuar usando o Elo." : "Seu período de teste grátis acabou. As assinaturas ainda não estão disponíveis; fale com a equipe Hirsch para continuar."}
+          {mode === "blocked"
+            ? "O acesso desta organização está suspenso pela administração do Elo. Seus contatos e tarefas continuam preservados."
+            : "O acesso desta organização expirou. Entre em contato com a equipe Hirsch para renovar ou solicitar uma cortesia."}
         </p>
         <SubscribeButton style={{ ...styles.primaryBtn, width: "100%", justifyContent: "center", textDecoration: "none" }} />
         <button
@@ -536,7 +569,7 @@ function AuthScreen() {
    SIDEBAR
    ============================================================ */
 
-function Sidebar({ tab, setTab }) {
+function Sidebar({ tab, setTab, isAdmin = false }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const items = [
     { id: "painel", label: "Painel", icon: LayoutGrid },
@@ -550,6 +583,7 @@ function Sidebar({ tab, setTab }) {
     { id: "ajuda", label: "Ajuda", icon: HelpCircle },
     { id: "planos", label: "Planos", icon: Layers },
     { id: "pagamentos", label: "Pagamentos", icon: Receipt },
+    ...(isAdmin ? [{ id: "admin_access", label: "Gestão de acessos", icon: ShieldCheck }] : []),
   ];
   const settingsActive = settingsItems.some((it) => it.id === tab);
 
@@ -1640,7 +1674,7 @@ function Planos({ remaining, isActive }) {
    PAGAMENTOS
    ============================================================ */
 
-function Pagamentos({ org, isActive }) {
+function Pagamentos({ org, isActive, mode }) {
   return (
     <div>
       <h1 style={styles.h1}>Pagamentos</h1>
@@ -1649,7 +1683,7 @@ function Pagamentos({ org, isActive }) {
       <div style={styles.panel}>
         <div style={styles.panelHeader}>Assinatura</div>
         <p style={{ fontSize: 13.5, color: "#374151", marginBottom: 10 }}>
-          Status: <strong>{isActive ? "Ativa" : org?.subscription_status === "trialing" ? "Em teste" : org?.subscription_status || "—"}</strong>
+          Modalidade: <strong>{mode === "free" ? "Gratuito" : mode === "courtesy" ? "Cortesia" : mode === "paid" ? "Pago" : mode === "blocked" ? "Bloqueado" : mode === "trial" ? "Teste" : "—"}</strong>
         </p>
         {!isActive && (
           <SubscribeButton style={{ ...styles.primaryBtn, textDecoration: "none", display: "inline-flex" }} />
