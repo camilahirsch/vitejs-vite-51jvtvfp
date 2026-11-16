@@ -40,6 +40,8 @@ import {
 } from "recharts";
 import { supabase } from "./supabaseClient";
 import AdminAccessPanel from "./AdminAccessPanel";
+import ContactsImportPanel from "./ContactsImportPanel";
+import ContactHistory from "./ContactHistory";
 import { agruparPorRegiao } from "./ddd";
 import { conversionRate as getConversionRate, localDate, shortMoney, validateContact, duplicateContact } from "./crm";
 
@@ -286,6 +288,8 @@ export default function EloCRM() {
       value: Number(contact.value) || 0,
       stage: contact.stage,
       notes: contact.notes,
+      entry_date: contact.entry_date || null,
+      first_contact_date: contact.first_contact_date || null,
       last_contact_date: contact.last_contact_date || null,
       next_reminder_date: contact.next_reminder_date || null,
       loss_reason: contact.loss_reason || null,
@@ -294,6 +298,41 @@ export default function EloCRM() {
     if (error) return error;
     loadData();
     return null;
+  };
+
+  const importContacts = async (rows) => {
+    if (!profile?.organization_id) throw new Error("Faça login para importar.");
+    let created = 0;
+    const errors = [];
+    const known = [...contacts];
+    for (let start = 0; start < rows.length; start += 50) {
+      const candidates = rows.slice(start, start + 50);
+      const safe = [];
+      for (const row of candidates) {
+        if (duplicateContact(row, [...known, ...safe])) {
+          errors.push("Linha " + row.line + ": telefone ou e-mail duplicado.");
+        } else safe.push(row);
+      }
+      if (!safe.length) continue;
+      const data = safe.map(({ line: _line, ...row }) => ({
+        ...row,
+        entry_date: row.entry_date || null,
+        first_contact_date: row.first_contact_date || null,
+        last_contact_date: row.last_contact_date || null,
+        next_reminder_date: row.next_reminder_date || null,
+        organization_id: profile.organization_id,
+        created_by: profile.id,
+      }));
+      const { data: inserted, error } = await supabase.from("contacts").insert(data).select("id");
+      if (error) {
+        errors.push("Lote a partir da linha " + safe[0].line + ": " + error.message);
+      } else {
+        created += inserted?.length ?? safe.length;
+        known.push(...safe);
+      }
+    }
+    await loadData();
+    return { created, errors };
   };
 
   const editContact = async (id, patch) => {
@@ -386,7 +425,7 @@ export default function EloCRM() {
         {access.mode === "trial" && remaining !== null && !access.is_admin && <TrialBanner daysLeft={remaining} />}
         {tab === "painel" && <Painel contacts={contacts} tasks={tasks} />}
         {tab === "contatos" && (
-          <Contatos contacts={contacts} onAdd={addContact} onEdit={editContact} onRemove={removeContact} />
+          <Contatos contacts={contacts} onAdd={addContact} onEdit={editContact} onRemove={removeContact} onImport={importContacts} onRefresh={loadData} />
         )}
         {tab === "funil" && <Funil contacts={contacts} onEdit={editContact} />}
         {tab === "graficos" && <Graficos contacts={contacts} />}
@@ -654,7 +693,7 @@ function Painel({ contacts, tasks }) {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
 
-  const scoped = contacts.filter((c) => inDateRange(c.created_at, rangeMode, customFrom, customTo));
+  const scoped = contacts.filter((c) => inDateRange(c.entry_date || c.created_at, rangeMode, customFrom, customTo));
 
   const open = scoped.filter((c) => c.stage !== "ganho" && c.stage !== "perdido");
   const won = scoped.filter((c) => c.stage === "ganho");
@@ -845,7 +884,7 @@ function DateRangePicker({ mode, from, to, onChangeMode, onChangeFrom, onChangeT
    CONTATOS
    ============================================================ */
 
-function Contatos({ contacts, onAdd, onEdit, onRemove }) {
+function Contatos({ contacts, onAdd, onEdit, onRemove, onImport, onRefresh }) {
   const [query, setQuery] = useState("");
   const [dateMode, setDateMode] = useState("all");
   const [customFrom, setCustomFrom] = useState("");
@@ -856,13 +895,14 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
   const [saveError, setSaveError] = useState("");
   const [saving, setSaving] = useState(false);
   const [duplicateConfirmed, setDuplicateConfirmed] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   const filtered = contacts.filter((c) => {
     const q = query.toLowerCase();
     const matchesQuery = [c.name, c.company, c.email, c.phone].some((value) => String(value || "").toLowerCase().includes(q));
     if (!matchesQuery) return false;
 
-    if (!inDateRange(c.created_at, dateMode, customFrom, customTo)) return false;
+    if (!inDateRange(c.entry_date || c.created_at, dateMode, customFrom, customTo)) return false;
 
     if (reminderOnly) {
       const state = c.next_reminder_date ? reminderState(c.next_reminder_date) : null;
@@ -880,6 +920,8 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
       value: "",
       stage: "novo",
       notes: "",
+      entry_date: "",
+      first_contact_date: "",
       last_contact_date: "",
       next_reminder_date: "",
       loss_reason: "",
@@ -930,9 +972,12 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
           <h1 style={styles.h1}>Contatos</h1>
           <p style={styles.sub}>{contacts.length} no total</p>
         </div>
-        <button style={styles.primaryBtn} onClick={openNew}>
-          <Plus size={16} /> Novo contato
-        </button>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button style={styles.secondaryBtn} onClick={()=>setShowImport(true)}>Importar contatos</button>
+          <button style={styles.primaryBtn} onClick={openNew}>
+            <Plus size={16} /> Novo contato
+          </button>
+        </div>
       </div>
 
       <div style={styles.filterRow}>
@@ -984,7 +1029,7 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
                   )}
                 </div>
                 <div style={styles.datesCol} className="elo-hide-narrow">
-                  <div style={styles.dateLine}>Entrada: {fmtDate(c.created_at)}</div>
+                  <div style={styles.dateLine}>Entrada: {fmtDate(c.entry_date || c.created_at)}</div>
                   {c.last_contact_date && <div style={styles.dateLine}>Últ. contato: {fmtDate(c.last_contact_date)}</div>}
                   {c.next_reminder_date && (
                     <div style={{ ...styles.dateLine, color: state === "vencido" ? "#B5493A" : state === "hoje" ? "#B8823A" : "#6B7178" }}>
@@ -1008,6 +1053,12 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
           })
         )}
       </div>
+
+      {showImport && (
+        <Modal onClose={()=>setShowImport(false)} title="Importar contatos de uma planilha">
+          <ContactsImportPanel contacts={contacts} onImport={onImport} onClose={()=>setShowImport(false)} />
+        </Modal>
+      )}
 
       {showForm && (
         <Modal onClose={() => setShowForm(false)} title={editing.id ? "Editar contato" : "Novo contato"}>
@@ -1054,11 +1105,16 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
             </select>
           </Field>
 
-          {editing.id && (
-            <Field label="Data de entrada">
-              <input style={{ ...styles.input, color: "#9AA0A6" }} value={fmtDate(editing.created_at) + " (fixa)"} disabled />
+          <div style={styles.fieldRow}>
+            <Field label="Data de entrada (opcional)">
+              <input style={styles.input} type="date" value={editing.entry_date || ""}
+                onChange={(e) => setEditing({ ...editing, entry_date: e.target.value })}/>
             </Field>
-          )}
+            <Field label="Data do primeiro contato (opcional)">
+              <input style={styles.input} type="date" value={editing.first_contact_date || ""}
+                onChange={(e) => setEditing({ ...editing, first_contact_date: e.target.value })}/>
+            </Field>
+          </div>}
 
           <div style={styles.fieldRow}>
             <Field label="Data do último contato">
@@ -1090,14 +1146,20 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
             </Field>
           )}
 
-          <Field label="Notas">
+          <Field label="Notas gerais">
             <textarea style={{ ...styles.input, minHeight: 70, resize: "vertical" }} value={editing.notes} onChange={(e) => setEditing({ ...editing, notes: e.target.value })} />
           </Field>
           {editing && duplicateContact(editing, contacts) && <label style={{ display: "flex", gap: 8, fontSize: 13, marginBottom: 12 }}>
             <input type="checkbox" checked={duplicateConfirmed} onChange={(e) => setDuplicateConfirmed(e.target.checked)} />
             Já existe um contato com esse e-mail ou telefone. Quero salvar outro registro.
           </label>}
-          {saveError && <div role="alert" style={styles.authError}>{saveError}</div>}
+          {editing.id && (
+            <ContactHistory contact={editing} stages={STAGES} onRecorded={async (patch) => {
+              setEditing(previous => previous ? { ...previous, ...patch } : previous);
+              await onRefresh?.();
+            }}/>
+          )}
+          {saveError && <div role="alert" style={styles.authError}>{saveError}</div>
           <div style={styles.modalFoot}>
             <button style={styles.secondaryBtn} onClick={() => setShowForm(false)}>
               Cancelar
@@ -1260,13 +1322,13 @@ function Graficos({ contacts }) {
   const revenueData = months.map((key) => ({
     mes: monthLabel(key),
     valor: contacts
-      .filter((c) => c.stage === "ganho" && monthKey(c.created_at) === key)
+      .filter((c) => c.stage === "ganho" && monthKey(c.entry_date || c.created_at) === key)
       .reduce((s, c) => s + Number(c.value || 0), 0),
   }));
 
   const dealsPerMonthData = months.map((key) => ({
     mes: monthLabel(key),
-    qtd: contacts.filter((c) => monthKey(c.created_at) === key).length,
+    qtd: contacts.filter((c) => monthKey(c.entry_date || c.created_at) === key).length,
   }));
 
   const won = contacts.filter((c) => c.stage === "ganho");
