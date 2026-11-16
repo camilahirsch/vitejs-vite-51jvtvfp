@@ -57,7 +57,7 @@ begin
   if p_occurred_at is null or nullif(btrim(p_note), '') is null then
     raise exception 'Informe a data e a observação';
   end if;
-  if p_new_stage not in ('novo', 'contato_feito', 'qualificado', 'proposta', 'negociacao', 'ganho', 'perdido') then
+  if p_new_stage is null or p_new_stage not in ('novo', 'contato_feito', 'qualificado', 'proposta', 'negociacao', 'ganho', 'perdido') then
     raise exception 'Status inválido';
   end if;
   select * into v_contact from public.contacts where id = p_contact_id for update;
