@@ -128,7 +128,8 @@ returns table (
   expires_on date,
   allowed boolean,
   members bigint,
-  member_summary text
+  member_summary text,
+  has_override boolean
 )
 language plpgsql stable security definer
 set search_path = ''
@@ -153,7 +154,8 @@ begin
     (select string_agg(coalesce(nullif(p.full_name, ''), u.email, 'Integrante sem nome'), ', ' order by coalesce(nullif(p.full_name, ''), u.email))
      from public.profiles p
      left join auth.users u on u.id = p.id
-     where p.organization_id = o.id)
+     where p.organization_id = o.id),
+    (g.organization_id is not null)
   from public.organizations o
   left join public.elo_access_grants g on g.organization_id = o.id
   order by o.name;
