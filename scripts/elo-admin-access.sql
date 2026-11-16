@@ -3,6 +3,8 @@
 -- Não execute sem identificar a conta administradora no passo final.
 -- Esta migração cria tabelas separadas e preserva organizações/contatos já existentes.
 
+begin;
+
 create table if not exists public.elo_admins (
   user_id uuid primary key references auth.users(id) on delete cascade,
   created_at timestamptz not null default now()
@@ -267,6 +269,27 @@ drop trigger if exists elo_prevent_customer_subscription_edit on public.organiza
 create trigger elo_prevent_customer_subscription_edit
   before update on public.organizations
   for each row execute function public.elo_prevent_customer_subscription_edit();
+
+-- Impede que um membro troque a própria organização via API.
+-- Futuro fluxo de convites deve usar função transacional segura, jamais UPDATE
+-- direto da coluna organization_id por um cliente autenticado.
+create or replace function public.elo_protect_profile_organization()
+returns trigger language plpgsql security invoker set search_path = ''
+as $
+begin
+  if new.organization_id is distinct from old.organization_id
+    and current_user = 'authenticated' then
+    raise exception 'Não é permitido mudar de organização diretamente';
+  end if;
+  return new;
+end;
+$;
+drop trigger if exists elo_protect_profile_organization on public.profiles;
+create trigger elo_protect_profile_organization
+  before update on public.profiles
+  for each row execute function public.elo_protect_profile_organization();
+
+commit;
 
 -- BOOTSTRAP MANUAL: substituir o endereço por aquele da conta que administrará o Elo
 -- e executar SOMENTE após confirmar que é a conta correta.
