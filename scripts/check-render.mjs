@@ -18,6 +18,7 @@ const server = await createServer({
 try {
   const { Graficos, Painel, Contatos, AuthScreen, Paywall } = await server.ssrLoadModule('/src/App.jsx');
   const { default: AdminAccessPanel } = await server.ssrLoadModule('/src/AdminAccessPanel.jsx');
+  const { default: ContactHistory } = await server.ssrLoadModule('/src/ContactHistory.jsx');
   const contacts = [
     { id: '1', name: 'QA', stage: 'ganho', value: 1000, created_at: '2026-09-29T12:00:00Z' },
     { id: '2', name: 'QA', stage: 'perdido', value: 500, created_at: '2026-09-29T12:00:00Z' },
@@ -34,6 +35,12 @@ try {
   assert.ok(render(Contatos, { contacts: [], onAdd() {}, onEdit() {}, onRemove() {} }).includes('aria-label="Buscar contatos"'), 'search should have an accessible name');
   assert.ok(render(AuthScreen).includes('color:#FFFFFF'), 'brand title should have explicit contrast');
   assert.ok(!render(Paywall).includes('href="#"'), 'unconfigured payment must not have a broken link');
+  const contactView = render(Contatos, {contacts:[],onAdd(){},onEdit(){},onRemove(){},onImport(){}});
+  assert.ok(contactView.includes('Importar contatos'), 'contacts screen should offer bulk import');
+  assert.ok(contactView.includes('Novo contato'), 'manual contact creation should remain available');
+  const activity = render(ContactHistory, { contact: {id:'example',organization_id:'org',stage:'novo'}, stages:[{id:'novo',label:'Novo lead'}] });
+  assert.ok(activity.includes('Histórico de interações'), 'individual contact should show its history');
+  assert.ok(activity.includes('Cobrança / financeiro'), 'interaction types should support financial follow-up');
   const adminView = render(AdminAccessPanel, { onRefreshAccess() {} });
   assert.ok(adminView.includes('Gestão de acessos'), 'admin panel heading should render');
   assert.ok(adminView.includes('Pesquisar organizações ou integrantes'), 'admin search should be labeled');
