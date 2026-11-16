@@ -20,6 +20,7 @@ create index if not exists contact_interactions_org_contact_date_idx
 on public.contact_interactions (organization_id, contact_id, occurred_at desc, created_at desc);
 
 alter table public.contact_interactions enable row level security;
+grant select on public.contact_interactions to authenticated;
 drop policy if exists "Organization users can read contact interactions" on public.contact_interactions;
 create policy "Organization users can read contact interactions"
 on public.contact_interactions for select to authenticated
