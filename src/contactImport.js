@@ -22,6 +22,7 @@ const STAGE_ALIASES = {
   qualificado: ["qualificado", "lead qualificado"],
   proposta: ["proposta", "proposta enviada"],
   negociacao: ["negociacao", "em negociacao", "negociando"],
+  cobrar: ["cobrar", "cobranca pendente", "aguardando pagamento", "pendente de pagamento"],
   ganho: ["ganho", "fechado", "venda concluida", "cliente"],
   perdido: ["perdido", "perda", "nao convertido"],
 };
