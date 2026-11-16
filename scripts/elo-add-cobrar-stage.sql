@@ -51,7 +51,7 @@ begin
   end if;
   return v_id;
 end;
-$function$
+$function$;
 
 revoke all on function public.elo_record_contact_interaction(uuid,date,text,text,text,date) from public,anon;
 grant execute on function public.elo_record_contact_interaction(uuid,date,text,text,text,date) to authenticated;
