@@ -225,6 +225,28 @@ create policy elo_commercial_access on public.tasks
   using (public.elo_org_has_access(organization_id))
   with check (public.elo_org_has_access(organization_id));
 
+-- Etapas do funil e histórico de interações também devem respeitar bloqueios.
+-- O segundo histórico é opcional, pois só existe após instalar a melhoria de Contatos.
+do $
+begin
+  if to_regclass('public.deal_stage_history') is not null then
+    execute 'alter table public.deal_stage_history enable row level security';
+    execute 'drop policy if exists elo_commercial_access on public.deal_stage_history';
+    execute 'create policy elo_commercial_access on public.deal_stage_history
+      as restrictive for all to authenticated
+      using (public.elo_org_has_access(organization_id))
+      with check (public.elo_org_has_access(organization_id))';
+  end if;
+  if to_regclass('public.contact_interactions') is not null then
+    execute 'alter table public.contact_interactions enable row level security';
+    execute 'drop policy if exists elo_commercial_access on public.contact_interactions';
+    execute 'create policy elo_commercial_access on public.contact_interactions
+      as restrictive for all to authenticated
+      using (public.elo_org_has_access(organization_id))
+      with check (public.elo_org_has_access(organization_id))';
+  end if;
+end $;
+
 -- Protege contra mudança de assinatura/período pelo frontend.
 -- Revise esta trigger se houver integração de cobrança que atualize estes campos.
 create or replace function public.elo_prevent_customer_subscription_edit()
