@@ -39,6 +39,8 @@ import {
 } from "recharts";
 import { supabase } from "./supabaseClient";
 import { agruparPorRegiao } from "./ddd";
+import ContactsImportPanel from "./ContactsImportPanel";
+import ContactHistory from "./ContactHistory";
 import { conversionRate as getConversionRate, localDate, shortMoney, validateContact, duplicateContact } from "./crm";
 
 /* ============================================================
@@ -272,6 +274,7 @@ export default function EloCRM() {
       value: Number(contact.value) || 0,
       stage: contact.stage,
       notes: contact.notes,
+      first_contact_date: contact.first_contact_date || null,
       last_contact_date: contact.last_contact_date || null,
       next_reminder_date: contact.next_reminder_date || null,
       loss_reason: contact.loss_reason || null,
@@ -280,6 +283,41 @@ export default function EloCRM() {
     if (error) return error;
     loadData();
     return null;
+  };
+
+  const importContacts = async (rows) => {
+    if (!profile?.organization_id) throw new Error("Entre na sua conta para importar os contatos.");
+    const errors = [];
+    let created = 0;
+    const known = [...contacts];
+    for (let i = 0; i < rows.length; i += 50) {
+      const batch = rows.slice(i, i + 50);
+      const safe = [];
+      for (const row of batch) {
+        if (duplicateContact(row, [...known, ...safe])) {
+          errors.push("Linha " + row.line + ": contato duplicado.");
+          continue;
+        }
+        safe.push(row);
+      }
+      if (!safe.length) continue;
+      const values = safe.map(({ line: _line, first_contact_date, next_reminder_date, last_contact_date, ...row }) => ({
+        ...row,
+        organization_id: profile.organization_id,
+        created_by: profile.id,
+        first_contact_date: first_contact_date || null,
+        next_reminder_date: next_reminder_date || null,
+        last_contact_date: last_contact_date || null,
+      }));
+      const { data, error } = await supabase.from("contacts").insert(values).select("id");
+      if (error) errors.push("Lote iniciado na linha " + safe[0].line + ": " + error.message);
+      else {
+        created += data?.length || safe.length;
+        known.push(...safe);
+      }
+    }
+    await loadData();
+    return { created, errors };
   };
 
   const editContact = async (id, patch) => {
@@ -356,7 +394,7 @@ export default function EloCRM() {
         {!isActive && remaining !== null && <TrialBanner daysLeft={remaining} />}
         {tab === "painel" && <Painel contacts={contacts} tasks={tasks} />}
         {tab === "contatos" && (
-          <Contatos contacts={contacts} onAdd={addContact} onEdit={editContact} onRemove={removeContact} />
+          <Contatos contacts={contacts} onAdd={addContact} onEdit={editContact} onRemove={removeContact} onImport={importContacts} onRefresh={loadData} />
         )}
         {tab === "funil" && <Funil contacts={contacts} onEdit={editContact} />}
         {tab === "graficos" && <Graficos contacts={contacts} />}
@@ -811,7 +849,7 @@ function DateRangePicker({ mode, from, to, onChangeMode, onChangeFrom, onChangeT
    CONTATOS
    ============================================================ */
 
-function Contatos({ contacts, onAdd, onEdit, onRemove }) {
+function Contatos({ contacts, onAdd, onEdit, onRemove, onImport, onRefresh }) {
   const [query, setQuery] = useState("");
   const [dateMode, setDateMode] = useState("all");
   const [customFrom, setCustomFrom] = useState("");
@@ -822,6 +860,7 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
   const [saveError, setSaveError] = useState("");
   const [saving, setSaving] = useState(false);
   const [duplicateConfirmed, setDuplicateConfirmed] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   const filtered = contacts.filter((c) => {
     const q = query.toLowerCase();
@@ -846,6 +885,7 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
       value: "",
       stage: "novo",
       notes: "",
+      first_contact_date: "",
       last_contact_date: "",
       next_reminder_date: "",
       loss_reason: "",
@@ -896,9 +936,12 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
           <h1 style={styles.h1}>Contatos</h1>
           <p style={styles.sub}>{contacts.length} no total</p>
         </div>
-        <button style={styles.primaryBtn} onClick={openNew}>
-          <Plus size={16} /> Novo contato
-        </button>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <button style={styles.secondaryBtn} onClick={() => setShowImport(true)}>Importar planilha</button>
+          <button style={styles.primaryBtn} onClick={openNew}>
+            <Plus size={16} /> Novo contato
+          </button>
+        </div>
       </div>
 
       <div style={styles.filterRow}>
@@ -975,6 +1018,12 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
         )}
       </div>
 
+      {showImport && (
+        <Modal title="Importar contatos da planilha" onClose={() => setShowImport(false)}>
+          <ContactsImportPanel contacts={contacts} onImport={onImport} onClose={() => setShowImport(false)} />
+        </Modal>
+      )}
+
       {showForm && (
         <Modal onClose={() => setShowForm(false)} title={editing.id ? "Editar contato" : "Novo contato"}>
           <Field label="Nome">
@@ -1020,6 +1069,11 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
             </select>
           </Field>
 
+          <Field label="Data do primeiro contato (opcional)">
+            <input style={styles.input} type="date" value={editing.first_contact_date || ""}
+              onChange={(e) => setEditing({ ...editing, first_contact_date: e.target.value })} />
+          </Field>
+
           {editing.id && (
             <Field label="Data de entrada">
               <input style={{ ...styles.input, color: "#9AA0A6" }} value={fmtDate(editing.created_at) + " (fixa)"} disabled />
@@ -1056,14 +1110,22 @@ function Contatos({ contacts, onAdd, onEdit, onRemove }) {
             </Field>
           )}
 
-          <Field label="Notas">
+          <Field label="Notas gerais / observação inicial">
             <textarea style={{ ...styles.input, minHeight: 70, resize: "vertical" }} value={editing.notes} onChange={(e) => setEditing({ ...editing, notes: e.target.value })} />
           </Field>
           {editing && duplicateContact(editing, contacts) && <label style={{ display: "flex", gap: 8, fontSize: 13, marginBottom: 12 }}>
             <input type="checkbox" checked={duplicateConfirmed} onChange={(e) => setDuplicateConfirmed(e.target.checked)} />
             Já existe um contato com esse e-mail ou telefone. Quero salvar outro registro.
           </label>}
-          {saveError && <div role="alert" style={styles.authError}>{saveError}</div>}
+          {editing.id && (
+            <ContactHistory contact={editing} stages={STAGES}
+              onRecorded={async () => {
+                await onRefresh?.();
+                setShowForm(false);
+                setEditing(null);
+              }} />
+          )}
+          {saveError && <div role="alert" style={styles.authError}>{saveError}</div>
           <div style={styles.modalFoot}>
             <button style={styles.secondaryBtn} onClick={() => setShowForm(false)}>
               Cancelar
